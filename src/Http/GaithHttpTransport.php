@@ -16,7 +16,7 @@ use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 
-final class GaithHttpTransport
+class GaithHttpTransport
 {
     /** @var GaithChatbotConfig */
     private $config;
