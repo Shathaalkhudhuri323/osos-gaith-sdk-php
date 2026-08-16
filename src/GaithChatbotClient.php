@@ -11,7 +11,11 @@ use Osos\Gaith\Sdk\Models\ChatMessage;
 use Osos\Gaith\Sdk\Models\Conversation;
 use Osos\Gaith\Sdk\Models\ConversationListOptions;
 use Osos\Gaith\Sdk\Models\MessagePageOptions;
+use Osos\Gaith\Sdk\Streaming\ChatEvent;
+use Osos\Gaith\Sdk\Streaming\SseReader;
+use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\StreamingHttpClientInterface;
+use Psr\Http\Message\RequestInterface;
 
 final class GaithChatbotClient
 {
@@ -23,10 +27,14 @@ final class GaithChatbotClient
     /** @var StreamingHttpClientInterface */
     private $streamingClient;
 
+    /** @var SseReader */
+    private $sseReader;
+
     public function __construct(GaithHttpTransport $transport, StreamingHttpClientInterface $streamingClient)
     {
         $this->transport = $transport;
         $this->streamingClient = $streamingClient;
+        $this->sseReader = new SseReader();
     }
 
     public function getMeta(): ChatbotMeta
@@ -108,5 +116,76 @@ final class GaithChatbotClient
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
         return $this->transport->getRaw('attachments/' . $artifactId, $query);
+    }
+
+    /**
+     * @param array<string, mixed> $options May contain: conversation_id, conversation_key, metadata, attachments
+     * @return \Generator<ChatEvent>
+     */
+    public function streamChat(GaithUser $user, string $message, array $options = []): \Generator
+    {
+        $lastEventId = null;
+        $streamId = null;
+        $startedAt = null;
+
+        while (true) {
+            $request = $this->buildChatRequest($user, $message, $options, $lastEventId, $streamId);
+            $handle = $this->streamingClient->sendStreaming($request);
+
+            try {
+                foreach ($this->sseReader->read($handle) as $frame) {
+                    if ($frame->id !== null) {
+                        $lastEventId = $frame->id;
+                    }
+
+                    $event = ChatEvent::fromFrame($frame);
+                    if ($event === null) {
+                        continue;
+                    }
+
+                    if ($event instanceof \Osos\Gaith\Sdk\Streaming\MetaEvent) {
+                        $streamId = $event->streamId();
+                        $startedAt = $startedAt ?? time();
+                    }
+
+                    yield $event;
+
+                    if ($event->isTerminal()) {
+                        return;
+                    }
+                }
+
+                return;
+            } catch (StreamDroppedException $e) {
+                $handle->close();
+
+                $withinWindow = $streamId !== null
+                    && $startedAt !== null
+                    && (time() - $startedAt) < self::RESUME_WINDOW_SECONDS;
+
+                if (!$withinWindow) {
+                    throw $e;
+                }
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     */
+    private function buildChatRequest(GaithUser $user, string $message, array $options, ?string $lastEventId, ?string $streamId): RequestInterface
+    {
+        $body = array_merge([
+            'message' => $message,
+            'external_user_id' => $user->id(),
+        ], $options);
+
+        $headers = [];
+        if ($lastEventId !== null && $streamId !== null) {
+            $headers['Last-Event-ID'] = $lastEventId;
+            $headers['X-Stream-Id'] = $streamId;
+        }
+
+        return $this->transport->buildStreamingRequest('chat', $body, $headers);
     }
 }

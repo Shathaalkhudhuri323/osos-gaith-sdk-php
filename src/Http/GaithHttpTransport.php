@@ -111,6 +111,24 @@ class GaithHttpTransport
         return $response->getBody();
     }
 
+    /**
+     * @param array<string, mixed> $body
+     * @param array<string, string> $extraHeaders
+     */
+    public function buildStreamingRequest(string $path, array $body, array $extraHeaders = []): RequestInterface
+    {
+        $request = $this->buildRequest('POST', $path, '')
+            ->withHeader('Content-Type', 'application/json')
+            ->withHeader('Accept', 'text/event-stream')
+            ->withBody($this->streamFactory->createStream(json_encode($body)));
+
+        foreach ($extraHeaders as $name => $value) {
+            $request = $request->withHeader($name, $value);
+        }
+
+        return $request;
+    }
+
     private function buildRequest(string $method, string $path, string $queryString): RequestInterface
     {
         $uri = $this->baseUri() . ltrim($path, '/');
