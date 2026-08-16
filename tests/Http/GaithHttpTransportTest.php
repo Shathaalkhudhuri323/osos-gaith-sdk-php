@@ -205,4 +205,66 @@ final class GaithHttpTransportTest extends TestCase
             $captured->getUri()->getPath()
         );
     }
+
+    public function testPostJsonSendsBodyAndReturnsDecodedResponse(): void
+    {
+        $captured = null;
+        $client = $this->fakeClient(new Response(200, [], '{"ok":true}'), $captured);
+        $factory = new HttpFactory();
+        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
+
+        $result = $transport->postJson('chat', ['message' => 'hi', 'external_user_id' => 'u1']);
+
+        $this->assertSame(['ok' => true], $result);
+        $this->assertSame('POST', $captured->getMethod());
+        $this->assertSame('application/json', $captured->getHeaderLine('Content-Type'));
+        $sentBody = json_decode((string) $captured->getBody(), true);
+        $this->assertSame(['message' => 'hi', 'external_user_id' => 'u1'], $sentBody);
+    }
+
+    public function testPostJsonMergesExtraHeaders(): void
+    {
+        $captured = null;
+        $client = $this->fakeClient(new Response(200, [], '{}'), $captured);
+        $factory = new HttpFactory();
+        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
+
+        $transport->postJson('chat', ['message' => 'hi'], ['Last-Event-ID' => '5']);
+
+        $this->assertSame('5', $captured->getHeaderLine('Last-Event-ID'));
+    }
+
+    public function testPostMultipartSendsFileAndUserIdParts(): void
+    {
+        $captured = null;
+        $responseBody = json_encode(['artifact_id' => 'a1', 'filename' => 'x.txt']);
+        $client = $this->fakeClient(new Response(200, [], $responseBody), $captured);
+        $factory = new HttpFactory();
+        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
+
+        $result = $transport->postMultipart('attachments', 'file bytes', 'x.txt', 'user-1');
+
+        $this->assertSame('a1', $result['artifact_id']);
+        $this->assertSame('POST', $captured->getMethod());
+        $this->assertStringContainsString('multipart/form-data', $captured->getHeaderLine('Content-Type'));
+        $rawBody = (string) $captured->getBody();
+        $this->assertStringContainsString('name="file"', $rawBody);
+        $this->assertStringContainsString('filename="x.txt"', $rawBody);
+        $this->assertStringContainsString('name="external_user_id"', $rawBody);
+        $this->assertStringContainsString('user-1', $rawBody);
+        $this->assertStringContainsString('file bytes', $rawBody);
+    }
+
+    public function testGetRawReturnsRawStream(): void
+    {
+        $captured = null;
+        $client = $this->fakeClient(new Response(200, [], 'raw bytes'), $captured);
+        $factory = new HttpFactory();
+        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
+
+        $stream = $transport->getRaw('attachments/artifact-1', 'external_user_id=user-1');
+
+        $this->assertSame('raw bytes', (string) $stream);
+        $this->assertSame('GET', $captured->getMethod());
+    }
 }

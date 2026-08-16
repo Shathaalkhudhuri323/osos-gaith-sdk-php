@@ -64,6 +64,53 @@ final class GaithHttpTransport
         $this->send($request);
     }
 
+    /**
+     * @param array<string, mixed> $body
+     * @param array<string, string> $extraHeaders
+     * @return array<string, mixed>
+     */
+    public function postJson(string $path, array $body, array $extraHeaders = []): array
+    {
+        $request = $this->buildRequest('POST', $path, '')
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($this->streamFactory->createStream(json_encode($body)));
+
+        foreach ($extraHeaders as $name => $value) {
+            $request = $request->withHeader($name, $value);
+        }
+
+        $response = $this->send($request);
+
+        return $this->decodeJson($response);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function postMultipart(string $path, string $fileContents, string $filename, string $externalUserId): array
+    {
+        $builder = new \Http\Message\MultipartStream\MultipartStreamBuilder($this->streamFactory);
+        $builder->addResource('file', $fileContents, ['filename' => $filename]);
+        $builder->addResource('external_user_id', $externalUserId);
+
+        $boundary = $builder->getBoundary();
+        $request = $this->buildRequest('POST', $path, '')
+            ->withHeader('Content-Type', 'multipart/form-data; boundary=' . $boundary)
+            ->withBody($builder->build());
+
+        $response = $this->send($request);
+
+        return $this->decodeJson($response);
+    }
+
+    public function getRaw(string $path, string $queryString = ''): \Psr\Http\Message\StreamInterface
+    {
+        $request = $this->buildRequest('GET', $path, $queryString);
+        $response = $this->send($request);
+
+        return $response->getBody();
+    }
+
     private function buildRequest(string $method, string $path, string $queryString): RequestInterface
     {
         $uri = $this->baseUri() . ltrim($path, '/');
