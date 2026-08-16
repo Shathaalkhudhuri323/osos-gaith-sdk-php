@@ -21,6 +21,8 @@ final class GaithChatbotClient
 {
     private const RESUME_WINDOW_SECONDS = 60;
 
+    private const MAX_RESUME_ATTEMPTS = 5;
+
     /** @var GaithHttpTransport */
     private $transport;
 
@@ -127,6 +129,7 @@ final class GaithChatbotClient
         $lastEventId = null;
         $streamId = null;
         $startedAt = null;
+        $resumeAttempts = 0;
 
         while (true) {
             $request = $this->buildChatRequest($user, $message, $options, $lastEventId, $streamId);
@@ -159,9 +162,13 @@ final class GaithChatbotClient
             } catch (StreamDroppedException $e) {
                 $handle->close();
 
-                $withinWindow = $streamId !== null
+                $resumeAttempts++;
+
+                $withinWindow = $lastEventId !== null
+                    && $streamId !== null
                     && $startedAt !== null
-                    && (time() - $startedAt) < self::RESUME_WINDOW_SECONDS;
+                    && (time() - $startedAt) < self::RESUME_WINDOW_SECONDS
+                    && $resumeAttempts <= self::MAX_RESUME_ATTEMPTS;
 
                 if (!$withinWindow) {
                     throw $e;

@@ -136,6 +136,54 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
     }
 
+    public function testMetaEventWithoutIdDoesNotResumeAfterDrop(): void
+    {
+        $transport = $this->createMock(GaithHttpTransport::class);
+        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
+
+        // meta event present (so $streamId is set) but the SSE frame carries no "id:" line,
+        // so $lastEventId stays null -- a resume without Last-Event-ID would duplicate the
+        // chat turn server-side, so streamChat() must NOT attempt to resume here.
+        $metaFrameNoId = "event: meta\ndata: " . json_encode(['conversation_id' => 'c1', 'user_message_id' => 'um1', 'stream_id' => 's1']) . "\n\n";
+
+        $streamingClient->expects($this->once())
+            ->method('sendStreaming')
+            ->willReturn($this->droppingHandleThenNull([$metaFrameNoId]));
+
+        $client = new GaithChatbotClient($transport, $streamingClient);
+
+        $this->expectException(StreamDroppedException::class);
+
+        iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
+    }
+
+    public function testExceedingMaxResumeAttemptsPropagatesDrop(): void
+    {
+        $transport = $this->createMock(GaithHttpTransport::class);
+        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
+
+        $metaFrame = "id: 1\nevent: meta\ndata: " . json_encode(['conversation_id' => 'c1', 'user_message_id' => 'um1', 'stream_id' => 's1']) . "\n\n";
+
+        $callCount = 0;
+        // 1 initial attempt + MAX_RESUME_ATTEMPTS (5) resumes = 6 total calls, all within the
+        // 60s window, before the loop gives up and lets the drop propagate.
+        $streamingClient->expects($this->exactly(6))
+            ->method('sendStreaming')
+            ->willReturnCallback(function () use (&$callCount, $metaFrame) {
+                $callCount++;
+                if ($callCount === 1) {
+                    return $this->droppingHandleThenNull([$metaFrame]);
+                }
+                return $this->droppingHandleThenNull([]);
+            });
+
+        $client = new GaithChatbotClient($transport, $streamingClient);
+
+        $this->expectException(StreamDroppedException::class);
+
+        iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
+    }
+
     public function testCleanStreamEndWithoutTerminalEventStopsWithoutResume(): void
     {
         $transport = $this->createMock(GaithHttpTransport::class);
