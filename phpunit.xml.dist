@@ -8,9 +8,9 @@
             <directory>tests</directory>
         </testsuite>
     </testsuites>
-    <source>
+    <coverage>
         <include>
             <directory suffix=".php">src</directory>
         </include>
-    </source>
+    </coverage>
 </phpunit>
