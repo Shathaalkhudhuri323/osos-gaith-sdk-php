@@ -6,6 +6,12 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\RequestException;
 use Osos\Gaith\Sdk\Exceptions\GaithApiException;
+use Osos\Gaith\Sdk\Exceptions\GaithAuthException;
+use Osos\Gaith\Sdk\Exceptions\GaithForbiddenException;
+use Osos\Gaith\Sdk\Exceptions\GaithGoneException;
+use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
+use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
+use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\StreamHandle;
 use Osos\Gaith\Sdk\Streaming\StreamingHttpClientInterface;
@@ -44,11 +50,34 @@ final class GuzzleStreamingClient implements StreamingHttpClientInterface
 
     private function mapErrorResponse(\Psr\Http\Message\ResponseInterface $response): GaithApiException
     {
+        $status = $response->getStatusCode();
         $body = (string) $response->getBody();
         $decoded = json_decode($body, true);
         $code = is_array($decoded) ? ($decoded['error']['code'] ?? null) : null;
         $message = is_array($decoded) ? ($decoded['error']['message'] ?? $response->getReasonPhrase()) : $response->getReasonPhrase();
 
-        return new GaithApiException($response->getStatusCode(), $code, $body, (string) $message);
+        $class = $this->exceptionClassForStatus($status);
+
+        return new $class($status, $code, $body, (string) $message);
+    }
+
+    private function exceptionClassForStatus(int $status): string
+    {
+        switch ($status) {
+            case 401:
+                return GaithAuthException::class;
+            case 403:
+                return GaithForbiddenException::class;
+            case 404:
+                return GaithNotFoundException::class;
+            case 410:
+                return GaithGoneException::class;
+            case 422:
+                return GaithValidationException::class;
+            case 429:
+                return GaithRateLimitException::class;
+            default:
+                return GaithApiException::class;
+        }
     }
 }

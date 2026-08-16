@@ -8,6 +8,12 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\HttpFactory;
 use GuzzleHttp\Psr7\Response;
 use Osos\Gaith\Sdk\Exceptions\GaithApiException;
+use Osos\Gaith\Sdk\Exceptions\GaithAuthException;
+use Osos\Gaith\Sdk\Exceptions\GaithForbiddenException;
+use Osos\Gaith\Sdk\Exceptions\GaithGoneException;
+use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
+use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
+use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\Streaming\Adapters\GuzzleStreamingClient;
 use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use PHPUnit\Framework\TestCase;
@@ -60,5 +66,40 @@ final class GuzzleStreamingClientTest extends TestCase
         $this->expectException(StreamDroppedException::class);
 
         $adapter->sendStreaming($request);
+    }
+
+    /**
+     * @dataProvider statusToExceptionProvider
+     */
+    public function testStatusMapsToTypedException(int $status, string $expectedClass): void
+    {
+        $body = json_encode(['error' => ['code' => 'some_code', 'message' => 'Something went wrong']]);
+        $mock = new MockHandler([new Response($status, [], $body)]);
+        $guzzle = new Client(['handler' => HandlerStack::create($mock)]);
+        $adapter = new GuzzleStreamingClient($guzzle);
+        $request = $this->requestFactory()->createRequest('POST', 'https://example.test/chat');
+
+        try {
+            $adapter->sendStreaming($request);
+            $this->fail('Expected exception');
+        } catch (GaithApiException $e) {
+            $this->assertInstanceOf($expectedClass, $e);
+            $this->assertSame($status, $e->statusCode());
+            $this->assertSame('some_code', $e->serverCode());
+            $this->assertSame('Something went wrong', $e->getMessage());
+        }
+    }
+
+    public function statusToExceptionProvider(): array
+    {
+        return [
+            [401, GaithAuthException::class],
+            [403, GaithForbiddenException::class],
+            [404, GaithNotFoundException::class],
+            [410, GaithGoneException::class],
+            [422, GaithValidationException::class],
+            [429, GaithRateLimitException::class],
+            [500, GaithApiException::class],
+        ];
     }
 }
