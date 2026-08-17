@@ -1,8 +1,5 @@
 # Architecture
 
-Audience: architects and senior tech leads evaluating, extending, or maintaining this SDK — not a
-getting-started guide (see `README.md` for that).
-
 ## 1. What this is and isn't
 
 `osos/gaith-sdk-php` is a **thin, server-side client library**. It runs inside a consuming PHP/Laravel
@@ -15,12 +12,6 @@ backend and talks to GAITH's public chatbot HTTP/SSE API. It ships:
 **GAITH is the system of record for chat history.** The consumer is explicitly not expected to store
 messages or transcripts itself; the SDK's `listConversations`/`getMessages` calls exist so a consumer
 can read that history back on demand, not so it can cache it.
-
-**This is a deliberate architectural port of an existing .NET SDK** (`osos-gaith-sdk-dotnet`), built to
-the same load-bearing design decisions. Where the two diverge, it should be because PHP has no equivalent
-primitive (e.g. no `IAsyncEnumerable`), not because of implementation drift. §8 catalogs the two SDKs'
-correspondence explicitly, since silent divergence between same-purpose SDKs in different languages is
-the most expensive kind of bug to discover — usually in production, usually by a customer.
 
 ## 2. Layering and request flow
 
