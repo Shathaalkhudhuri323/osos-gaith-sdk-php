@@ -184,6 +184,39 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
     }
 
+    public function testOptionsCannotOverrideAuthenticatedUserId(): void
+    {
+        $config = new \Osos\Gaith\Sdk\Config\GaithChatbotConfig(
+            'https://gaith-backend-dev.osos.om',
+            '11111111-1111-1111-1111-111111111111',
+            'test-key'
+        );
+        $httpFactory = new \GuzzleHttp\Psr7\HttpFactory();
+        $dummyHttpClient = $this->createMock(\Psr\Http\Client\ClientInterface::class);
+        $transport = new GaithHttpTransport($config, $dummyHttpClient, $httpFactory, $httpFactory);
+        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
+
+        $capturedRequests = [];
+        $streamingClient->expects($this->once())
+            ->method('sendStreaming')
+            ->willReturnCallback(function (RequestInterface $request) use (&$capturedRequests) {
+                $capturedRequests[] = $request;
+                return $this->handleFor([]);
+            });
+
+        $client = new GaithChatbotClient($transport, $streamingClient);
+
+        iterator_to_array($client->streamChat(
+            GaithUser::for('real-user'),
+            'hello',
+            ['external_user_id' => 'someone-else', 'metadata' => ['k' => 'v']]
+        ));
+
+        $sentBody = json_decode((string) $capturedRequests[0]->getBody(), true);
+        $this->assertSame('real-user', $sentBody['external_user_id']);
+        $this->assertSame(['k' => 'v'], $sentBody['metadata']);
+    }
+
     public function testCleanStreamEndWithoutTerminalEventStopsWithoutResume(): void
     {
         $transport = $this->createMock(GaithHttpTransport::class);

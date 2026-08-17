@@ -63,6 +63,14 @@ adapter such as `php-http/guzzle6-adapter`. The streaming path (`StreamingHttpCl
 SDK-owned, not PSR-18 — implement it yourself if you need a transport other than the bundled
 `GuzzleStreamingClient`.
 
+**Note on the Laravel bridge**: `composer.json` requires `guzzlehttp/guzzle: ^7.0.1` because the bundled
+Laravel bridge (`Osos\Gaith\Sdk\Laravel\GaithChatbotClientFactory`) hardcodes `GuzzleHttp\Psr7\HttpFactory`
+(only available in `guzzlehttp/psr7` ^2.x, shipped by Guzzle ^7.2+) and constructs `GuzzleHttp\Client`
+directly as both the PSR-18 client and the streaming adapter's backing client — Guzzle 6 does not
+implement PSR-18 and would fail at runtime, not at `composer install` time. If you must use Guzzle
+`^6.3.1` with `php-http/guzzle6-adapter` as described above, you can only do so with the framework-agnostic
+core (`GaithHttpTransport` + your own PSR-18 client); the Laravel bridge is not compatible with it.
+
 ## Laravel usage
 
 1. Publish the config: `php artisan vendor:publish --tag=gaith-chatbot-config`

@@ -117,10 +117,15 @@ class GaithHttpTransport
      */
     public function buildStreamingRequest(string $path, array $body, array $extraHeaders = []): RequestInterface
     {
+        $json = json_encode($body);
+        if ($json === false) {
+            throw new \InvalidArgumentException('Request body could not be encoded as JSON: ' . json_last_error_msg());
+        }
+
         $request = $this->buildRequest('POST', $path, '')
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Accept', 'text/event-stream')
-            ->withBody($this->streamFactory->createStream(json_encode($body)));
+            ->withBody($this->streamFactory->createStream($json));
 
         foreach ($extraHeaders as $name => $value) {
             $request = $request->withHeader($name, $value);

@@ -28,7 +28,15 @@ final class GuzzleStreamHandle implements StreamHandle
             throw new StreamDroppedException($e->getMessage(), 0, $e);
         }
 
-        return $chunk === '' ? null : $chunk;
+        if ($chunk === '') {
+            if ($this->body->eof()) {
+                return null;
+            }
+
+            throw new StreamDroppedException('Stream read returned no data before EOF; likely a stalled or timed-out connection.');
+        }
+
+        return $chunk;
     }
 
     public function close(): void

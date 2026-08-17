@@ -136,32 +136,34 @@ final class GaithChatbotClient
             $handle = $this->streamingClient->sendStreaming($request);
 
             try {
-                foreach ($this->sseReader->read($handle) as $frame) {
-                    if ($frame->id !== null) {
-                        $lastEventId = $frame->id;
+                try {
+                    foreach ($this->sseReader->read($handle) as $frame) {
+                        if ($frame->id !== null) {
+                            $lastEventId = $frame->id;
+                        }
+
+                        $event = ChatEvent::fromFrame($frame);
+                        if ($event === null) {
+                            continue;
+                        }
+
+                        if ($event instanceof \Osos\Gaith\Sdk\Streaming\MetaEvent) {
+                            $streamId = $event->streamId();
+                            $startedAt = $startedAt ?? time();
+                        }
+
+                        yield $event;
+
+                        if ($event->isTerminal()) {
+                            return;
+                        }
                     }
 
-                    $event = ChatEvent::fromFrame($frame);
-                    if ($event === null) {
-                        continue;
-                    }
-
-                    if ($event instanceof \Osos\Gaith\Sdk\Streaming\MetaEvent) {
-                        $streamId = $event->streamId();
-                        $startedAt = $startedAt ?? time();
-                    }
-
-                    yield $event;
-
-                    if ($event->isTerminal()) {
-                        return;
-                    }
+                    return;
+                } finally {
+                    $handle->close();
                 }
-
-                return;
             } catch (StreamDroppedException $e) {
-                $handle->close();
-
                 $resumeAttempts++;
 
                 $withinWindow = $lastEventId !== null
@@ -182,10 +184,10 @@ final class GaithChatbotClient
      */
     private function buildChatRequest(GaithUser $user, string $message, array $options, ?string $lastEventId, ?string $streamId): RequestInterface
     {
-        $body = array_merge([
+        $body = array_merge($options, [
             'message' => $message,
             'external_user_id' => $user->id(),
-        ], $options);
+        ]);
 
         $headers = [];
         if ($lastEventId !== null && $streamId !== null) {
