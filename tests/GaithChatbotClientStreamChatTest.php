@@ -136,52 +136,44 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
     }
 
-    public function testMetaEventWithoutIdDoesNotResumeAfterDrop(): void
+    public function testMetaEventWithoutIdStillResumesUsingStreamIdOnly(): void
     {
-        $transport = $this->createMock(GaithHttpTransport::class);
+        $config = new \Osos\Gaith\Sdk\Config\GaithChatbotConfig(
+            'https://gaith-backend-dev.osos.om',
+            '11111111-1111-1111-1111-111111111111',
+            'test-key'
+        );
+        $httpFactory = new \GuzzleHttp\Psr7\HttpFactory();
+        $dummyHttpClient = $this->createMock(\Psr\Http\Client\ClientInterface::class);
+        $transport = new GaithHttpTransport($config, $dummyHttpClient, $httpFactory, $httpFactory);
         $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
 
         // meta event present (so $streamId is set) but the SSE frame carries no "id:" line,
-        // so $lastEventId stays null -- a resume without Last-Event-ID would duplicate the
-        // chat turn server-side, so streamChat() must NOT attempt to resume here.
+        // so $lastEventId stays null. Resume eligibility is governed by streamId + the 60s
+        // window alone (matching the .NET reference SDK) -- streamChat() must still resume,
+        // sending X-Stream-Id but omitting Last-Event-ID since none was ever received.
         $metaFrameNoId = "event: meta\ndata: " . json_encode(['conversation_id' => 'c1', 'user_message_id' => 'um1', 'stream_id' => 's1']) . "\n\n";
+        $doneFrame = "event: done\ndata: " . json_encode(['message_id' => 'm1', 'conversation_id' => 'c1', 'finish_reason' => null, 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]) . "\n\n";
 
-        $streamingClient->expects($this->once())
+        $capturedRequests = [];
+        $streamingClient->expects($this->exactly(2))
             ->method('sendStreaming')
-            ->willReturn($this->droppingHandleThenNull([$metaFrameNoId]));
-
-        $client = new GaithChatbotClient($transport, $streamingClient);
-
-        $this->expectException(StreamDroppedException::class);
-
-        iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
-    }
-
-    public function testExceedingMaxResumeAttemptsPropagatesDrop(): void
-    {
-        $transport = $this->createMock(GaithHttpTransport::class);
-        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
-
-        $metaFrame = "id: 1\nevent: meta\ndata: " . json_encode(['conversation_id' => 'c1', 'user_message_id' => 'um1', 'stream_id' => 's1']) . "\n\n";
-
-        $callCount = 0;
-        // 1 initial attempt + MAX_RESUME_ATTEMPTS (5) resumes = 6 total calls, all within the
-        // 60s window, before the loop gives up and lets the drop propagate.
-        $streamingClient->expects($this->exactly(6))
-            ->method('sendStreaming')
-            ->willReturnCallback(function () use (&$callCount, $metaFrame) {
-                $callCount++;
-                if ($callCount === 1) {
-                    return $this->droppingHandleThenNull([$metaFrame]);
+            ->willReturnCallback(function (RequestInterface $request) use (&$capturedRequests, $metaFrameNoId, $doneFrame) {
+                $capturedRequests[] = $request;
+                if (count($capturedRequests) === 1) {
+                    return $this->droppingHandleThenNull([$metaFrameNoId]);
                 }
-                return $this->droppingHandleThenNull([]);
+                return $this->handleFor([$doneFrame]);
             });
 
         $client = new GaithChatbotClient($transport, $streamingClient);
 
-        $this->expectException(StreamDroppedException::class);
+        $events = iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
 
-        iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
+        $this->assertInstanceOf(MetaEvent::class, $events[0]);
+        $this->assertInstanceOf(DoneEvent::class, $events[1]);
+        $this->assertSame('s1', $capturedRequests[1]->getHeaderLine('X-Stream-Id'));
+        $this->assertSame('', $capturedRequests[1]->getHeaderLine('Last-Event-ID'));
     }
 
     public function testOptionsCannotOverrideAuthenticatedUserId(): void

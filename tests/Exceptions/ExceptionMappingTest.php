@@ -15,7 +15,7 @@ final class ExceptionMappingTest extends TestCase
 {
     public function testBaseExceptionExposesFields(): void
     {
-        $e = new GaithApiException(500, 'upstream_error', '{"raw":true}', 'Server error');
+        $e = new GaithApiException(500, 'upstream_error', 'Server error', '{"raw":true}');
 
         $this->assertSame(500, $e->statusCode());
         $this->assertSame('upstream_error', $e->serverCode());
@@ -25,7 +25,7 @@ final class ExceptionMappingTest extends TestCase
 
     public function testServerCodeCanBeNull(): void
     {
-        $e = new GaithApiException(500, null, 'body', 'msg');
+        $e = new GaithApiException(500, null, 'msg', 'body');
 
         $this->assertNull($e->serverCode());
     }
@@ -35,7 +35,7 @@ final class ExceptionMappingTest extends TestCase
      */
     public function testSubclassIsGaithApiException(string $class, int $expectedStatus): void
     {
-        $e = new $class($expectedStatus, 'some_code', 'body', 'msg');
+        $e = new $class($expectedStatus, 'some_code', 'msg', 'body');
 
         $this->assertInstanceOf(GaithApiException::class, $e);
         $this->assertSame($expectedStatus, $e->statusCode());

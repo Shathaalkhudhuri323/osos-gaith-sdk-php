@@ -13,7 +13,7 @@ class GaithApiException extends \RuntimeException
     /** @var string */
     private $responseBody;
 
-    public function __construct(int $statusCode, ?string $serverCode, string $responseBody, string $message)
+    public function __construct(int $statusCode, ?string $serverCode, string $message, string $responseBody)
     {
         parent::__construct($message);
 

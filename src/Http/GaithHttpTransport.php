@@ -181,7 +181,7 @@ class GaithHttpTransport
 
         $class = $this->exceptionClassForStatus($status);
 
-        return new $class($status, $serverCode, $rawBody, $message);
+        return new $class($status, $serverCode, $message, $rawBody);
     }
 
     /**

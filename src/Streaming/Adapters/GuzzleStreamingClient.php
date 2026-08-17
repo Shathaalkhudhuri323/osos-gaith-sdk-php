@@ -58,7 +58,7 @@ final class GuzzleStreamingClient implements StreamingHttpClientInterface
 
         $class = $this->exceptionClassForStatus($status);
 
-        return new $class($status, $code, $body, (string) $message);
+        return new $class($status, $code, (string) $message, $body);
     }
 
     private function exceptionClassForStatus(int $status): string

@@ -21,8 +21,6 @@ final class GaithChatbotClient
 {
     private const RESUME_WINDOW_SECONDS = 60;
 
-    private const MAX_RESUME_ATTEMPTS = 5;
-
     /** @var GaithHttpTransport */
     private $transport;
 
@@ -129,7 +127,6 @@ final class GaithChatbotClient
         $lastEventId = null;
         $streamId = null;
         $startedAt = null;
-        $resumeAttempts = 0;
 
         while (true) {
             $request = $this->buildChatRequest($user, $message, $options, $lastEventId, $streamId);
@@ -164,13 +161,9 @@ final class GaithChatbotClient
                     $handle->close();
                 }
             } catch (StreamDroppedException $e) {
-                $resumeAttempts++;
-
-                $withinWindow = $lastEventId !== null
-                    && $streamId !== null
+                $withinWindow = $streamId !== null
                     && $startedAt !== null
-                    && (time() - $startedAt) < self::RESUME_WINDOW_SECONDS
-                    && $resumeAttempts <= self::MAX_RESUME_ATTEMPTS;
+                    && (time() - $startedAt) < self::RESUME_WINDOW_SECONDS;
 
                 if (!$withinWindow) {
                     throw $e;
@@ -190,9 +183,11 @@ final class GaithChatbotClient
         ]);
 
         $headers = [];
-        if ($lastEventId !== null && $streamId !== null) {
-            $headers['Last-Event-ID'] = $lastEventId;
+        if ($streamId !== null) {
             $headers['X-Stream-Id'] = $streamId;
+            if ($lastEventId !== null) {
+                $headers['Last-Event-ID'] = $lastEventId;
+            }
         }
 
         return $this->transport->buildStreamingRequest('chat', $body, $headers);
