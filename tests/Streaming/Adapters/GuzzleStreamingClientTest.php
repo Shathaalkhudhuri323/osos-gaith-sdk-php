@@ -127,7 +127,7 @@ final class GuzzleStreamingClientTest extends TestCase
         $handle->read();
     }
 
-    public function statusToExceptionProvider(): array
+    public static function statusToExceptionProvider(): array
     {
         return [
             [401, GaithAuthException::class],

@@ -41,7 +41,7 @@ final class ExceptionMappingTest extends TestCase
         $this->assertSame($expectedStatus, $e->statusCode());
     }
 
-    public function subclassProvider(): array
+    public static function subclassProvider(): array
     {
         return [
             [GaithAuthException::class, 401],
