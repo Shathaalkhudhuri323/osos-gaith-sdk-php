@@ -1,0 +1,12 @@
+# Kept out of Composer dist installs: consumers get src/, config/ and the built
+# widget in dist/, not its TypeScript source, tests or demos.
+/widget export-ignore
+/tests export-ignore
+/examples export-ignore
+/docs export-ignore
+/phpunit.xml.dist export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+
+# The built bundle is generated; review the source in widget/ instead.
+/dist/** linguist-generated=true -diff
