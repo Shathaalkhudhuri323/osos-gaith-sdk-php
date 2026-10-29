@@ -7,6 +7,7 @@ function recorder() {
     onConversation: (id) => calls.push('conversation:' + id),
     onToken: (t) => calls.push('token:' + t),
     onFile: (f) => calls.push('file:' + f.filename + ':' + f.media_type + ':' + f.size_bytes),
+    onQuestion: (options) => calls.push('question:' + options.join('|')),
     onNotice: (k, d) => calls.push('notice:' + k + ':' + d),
     onDone: (id) => calls.push('done:' + id),
     onError: (code) => calls.push('error:' + code),
@@ -108,6 +109,23 @@ describe('file events', () => {
     await flush();
 
     expect(calls).toEqual(['file:onboarding-checklist.pdf:application/pdf:36979', 'done:c1']);
+  });
+});
+
+describe('question events', () => {
+  it('reports the options of a clarifying question, and ignores a malformed one', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse([
+      'event: token\ndata: {"content":"Which month?"}\n\n',
+      'event: question\ndata: {"question":"Which month?","options":["October"," November ","October",5]}\n\n',
+      'event: question\ndata: {"question":"Broken","options":["only one"]}\n\n',
+      'event: done\ndata: {"message_id":"m1","conversation_id":"c1","finish_reason":"question"}\n\n',
+    ]));
+    const { calls, handlers } = recorder();
+
+    streamTurn('api/gaith', 'show my leave', null, null, handlers);
+    await flush();
+
+    expect(calls).toEqual(['token:Which month?', 'question:October|November', 'done:c1']);
   });
 });
 

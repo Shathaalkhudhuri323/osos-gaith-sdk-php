@@ -22,6 +22,15 @@ afterEach(() => {
 });
 
 describe('<gaith-chat>', () => {
+  it('starts with the built-in greeting alongside the panel controls', () => {
+    routeFetch({});
+    const el = mount();
+
+    expect(bubbles(el)).toEqual(['How can I help you today?']);
+    expect(shadow(el).querySelector('.message.welcome')).not.toBeNull();
+    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(2);
+  });
+
   it('shows the configured welcome text and starter options before the first message', () => {
     routeFetch({});
     const el = mount() as any;
@@ -29,6 +38,34 @@ describe('<gaith-chat>', () => {
 
     expect(bubbles(el)).toEqual(['Hello!']);
     expect(shadow(el).querySelector('.option')!.textContent).toBe('Show approvals');
+  });
+
+  it('shows the example prompt and GAITH branding above the composer', () => {
+    routeFetch({});
+    const el = mount();
+
+    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder)
+      .toBe('Example: “Show my pending approvals”');
+    expect(shadow(el).querySelector('.powered')!.textContent).toBe('Powered by GAITH');
+    expect(shadow(el).querySelector('.powered svg')).not.toBeNull();
+  });
+
+  it('keeps only refresh and exit controls in the visual header', () => {
+    routeFetch({});
+    const el = mount();
+
+    expect(shadow(el).querySelector('.avatar')).toBeNull();
+    expect(shadow(el).querySelector('.heading')).toBeNull();
+    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(2);
+  });
+
+  it('allows each host product to provide its own example prompt', () => {
+    routeFetch({});
+    const el = mount() as any;
+    el.options = { placeholder: { en: 'Example: “Find incident 42”' } };
+
+    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder)
+      .toBe('Example: “Find incident 42”');
   });
 
   it('streams a reply into a bot bubble and remembers the conversation', async () => {
@@ -306,6 +343,64 @@ describe('<gaith-chat>', () => {
     });
   });
 
+  describe('clarifying questions', () => {
+    const QUESTION = [
+      'event: meta\ndata: {"conversation_id":"c1"}\n\n',
+      'event: token\ndata: {"content":"Which month?"}\n\n',
+      'event: question\ndata: {"question":"Which month?","options":["October","November"]}\n\n',
+      'event: done\ndata: {"message_id":"m1","conversation_id":"c1","finish_reason":"question"}\n\n',
+    ];
+    const answers = (el: HTMLElement) =>
+      Array.from(shadow(el).querySelectorAll('.answers .option')).map((b) => b.textContent);
+
+    it('shows the options under the question and sends the clicked one as the next message', async () => {
+      let turn = 0;
+      const fetchMock = routeFetch({ '/stream': () => sseResponse(++turn === 1 ? QUESTION : HAPPY_PATH) });
+      const el = mount() as any;
+
+      el.send('show my leave');
+      await flush(50);
+      expect(bubbles(el)).toEqual(['show my leave', 'Which month?']);
+      expect(answers(el)).toEqual(['October', 'November']);
+
+      (shadow(el).querySelector('.answers .option') as HTMLButtonElement).click();
+      await flush(50);
+
+      const sent = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/stream'))
+        .map((c) => JSON.parse((c[1] as RequestInit).body as string).message);
+      expect(sent).toEqual(['show my leave', 'October']);
+      expect(answers(el)).toEqual([]); // settled once answered
+    });
+
+    it('drops the options when the user types an answer instead', async () => {
+      let turn = 0;
+      routeFetch({ '/stream': () => sseResponse(++turn === 1 ? QUESTION : HAPPY_PATH) });
+      const el = mount() as any;
+      el.send('show my leave');
+      await flush(50);
+
+      el.send('December actually');
+      await flush(50);
+
+      expect(answers(el)).toEqual([]);
+    });
+
+    it('brings the options of an unanswered question back after a reload', async () => {
+      sessionStorage.setItem('gaith-chat:conversation:api/gaith', 'c1');
+      routeFetch({
+        '/conversations/c1/messages': () => json({ messages: [
+          { role: 'user', content: 'show my leave', created_at: '2026-01-01T10:00:00Z', files: [], options: [] },
+          { role: 'assistant', content: 'Which month?', created_at: '2026-01-01T10:00:05Z', files: [], options: ['October', 'November'] },
+        ] }),
+      });
+
+      const el = mount();
+      await flush(50);
+
+      expect(answers(el)).toEqual(['October', 'November']);
+    });
+  });
+
   describe('attachments', () => {
     const RULES = {
       enabled: true,
@@ -477,7 +572,8 @@ describe('<gaith-chat>', () => {
     const el = mount({ lang: 'ar' });
 
     expect(container(el).getAttribute('dir')).toBe('rtl');
-    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder).toBe('اكتب رسالتك');
+    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder).toBe('مثال: «اعرض الموافقات المعلقة»');
+    expect(shadow(el).querySelector('.powered')!.textContent).toBe('مدعوم من GAITH');
   });
 
   it('reset starts a new conversation', async () => {
@@ -488,7 +584,7 @@ describe('<gaith-chat>', () => {
 
     el.reset();
 
-    expect(bubbles(el)).toEqual([]);
+    expect(bubbles(el)).toEqual(['How can I help you today?']);
     expect(sessionStorage.getItem('gaith-chat:conversation:api/gaith')).toBeNull();
   });
 });

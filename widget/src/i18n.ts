@@ -2,10 +2,12 @@ export type Lang = 'en' | 'ar';
 
 export interface Strings {
   chat: string;
+  welcome: string;
   online: string;
   thinking: string;
   unavailable: string;
   placeholder: string;
+  poweredBy: string;
   send: string;
   reset: string;
   close: string;
@@ -35,10 +37,12 @@ export interface Strings {
 const STRINGS: Record<Lang, Strings> = {
   en: {
     chat: 'Chat',
+    welcome: 'How can I help you today?',
     online: 'Online',
     thinking: 'Typing...',
     unavailable: 'Unavailable',
-    placeholder: 'Type your message',
+    placeholder: 'Example: “Show my pending approvals”',
+    poweredBy: 'Powered by GAITH',
     send: 'Send',
     reset: 'New conversation',
     close: 'Close',
@@ -64,10 +68,12 @@ const STRINGS: Record<Lang, Strings> = {
   },
   ar: {
     chat: 'محادثة',
+    welcome: 'كيف يمكنني مساعدتك اليوم؟',
     online: 'متصل',
     thinking: 'يكتب...',
     unavailable: 'غير متاح',
-    placeholder: 'اكتب رسالتك',
+    placeholder: 'مثال: «اعرض الموافقات المعلقة»',
+    poweredBy: 'مدعوم من GAITH',
     send: 'إرسال',
     reset: 'محادثة جديدة',
     close: 'إغلاق',

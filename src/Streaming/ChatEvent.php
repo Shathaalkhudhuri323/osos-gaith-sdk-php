@@ -44,6 +44,10 @@ abstract class ChatEvent
                 return new ErrorEvent($data['code'], $data['message']);
             case 'safety_block':
                 return new SafetyBlockEvent();
+            case 'question':
+                $question = \Osos\Gaith\Sdk\Models\Question::fromArray($data);
+                // A malformed question is skipped like an unknown event; its text still arrived as tokens.
+                return $question === null ? null : new QuestionEvent((string) ($data['id'] ?? ''), $question);
             default:
                 return null;
         }

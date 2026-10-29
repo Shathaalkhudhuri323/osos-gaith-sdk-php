@@ -8,15 +8,18 @@ final class MessageMetadata
     private $attachments;
     /** @var FileRef[] */
     private $files;
+    /** @var Question|null */
+    private $question;
 
     /**
      * @param FileRef[] $attachments
      * @param FileRef[] $files
      */
-    public function __construct(array $attachments, array $files)
+    public function __construct(array $attachments, array $files, ?Question $question = null)
     {
         $this->attachments = $attachments;
         $this->files = $files;
+        $this->question = $question;
     }
 
     public static function fromArray(array $data): self
@@ -27,9 +30,18 @@ final class MessageMetadata
             }, $items);
         };
 
+        // GAITH saves a clarifying question among the reply's tool events.
+        $question = null;
+        foreach ((array) ($data['tool_events'] ?? []) as $event) {
+            if (is_array($event) && ($event['event'] ?? null) === 'question') {
+                $question = Question::fromArray($event) ?? $question;
+            }
+        }
+
         return new self(
             $mapRefs($data['attachments'] ?? []),
-            $mapRefs($data['files'] ?? [])
+            $mapRefs($data['files'] ?? []),
+            $question
         );
     }
 
@@ -38,4 +50,7 @@ final class MessageMetadata
 
     /** @return FileRef[] */
     public function files(): array { return $this->files; }
+
+    /** The clarifying question this reply asked, with its options; null if it asked none. */
+    public function question(): ?Question { return $this->question; }
 }

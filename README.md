@@ -164,7 +164,11 @@ chat.getHeaders = ({ method, path, body }) => ({
 chat.options = {
   welcomeMessage: { en: 'Hello! How can I help?', ar: 'مرحبا! كيف يمكنني مساعدتك؟' },
   errorMessage:   { en: 'Sorry, something went wrong.', ar: 'عذرًا، حدث خطأ.' },
+  // Optional fixed starter buttons. Not needed for GAITH's own clickable options: when a
+  // chatbot has follow-up questions enabled, its clarifying questions arrive with answer
+  // buttons automatically (shown under the latest reply, and again after a reload).
   quickOptions:   { en: ['Show my pending approvals'], ar: ['إظهار الموافقات المعلقة'] },
+  placeholder:    { en: 'Example: “Show my pending approvals”', ar: 'مثال: «اعرض الموافقات المعلقة»' },
 };
 ```
 

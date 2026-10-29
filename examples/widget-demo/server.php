@@ -180,6 +180,16 @@ if ($method === 'POST' && $path === '/api/gaith/stream') {
         $conversationId = $body['conversation_id'] ?? ('fake-' . bin2hex(random_bytes(4)));
         $emit('meta', ['conversation_id' => $conversationId]);
         $reply = "**Fake mode** (no GAITH credentials set). You said:\n\n> " . $message . "\n\n- markdown renders\n- tokens stream";
+        if (preg_match('/leave|month|إجازة/iu', $message)) {
+            // What a chatbot with follow-up questions enabled sends (GAITH present_options).
+            foreach (preg_split('/(?<= )/u', 'Which month do you want to see your leave for?') as $piece) {
+                $emit('token', ['content' => $piece]);
+                usleep(40000);
+            }
+            $emit('question', ['question' => 'Which month do you want to see your leave for?', 'options' => ['October', 'November', 'December']]);
+            $emit('done', ['message_id' => 'fake-q', 'conversation_id' => $conversationId, 'finish_reason' => 'question']);
+            return true;
+        }
         if (preg_match('/photo|image|picture|صور/iu', $message)) {
             // What a reply carrying an MCP image link (e.g. QHSE open_files) would look like.
             $reply = "Here is the latest photo attached to **incident #42**:\n\n"
@@ -215,6 +225,8 @@ if ($method === 'POST' && $path === '/api/gaith/stream') {
                 $emit('error', ['code' => $event->code(), 'message' => $event->message()]);
             } elseif ($event instanceof SafetyBlockEvent) {
                 $emit('safety_block');
+            } elseif ($event instanceof \Osos\Gaith\Sdk\Streaming\QuestionEvent) {
+                $emit('question', ['question' => $event->question()->question(), 'options' => $event->question()->options()]);
             } elseif ($event instanceof FileEvent) {
                 // No download_url: it needs the API key. The widget uses /api/gaith/files/{id}.
                 $emit('file', $filePayload($event->file()));
@@ -248,7 +260,14 @@ if ($method === 'GET' && preg_match('#^/api/gaith/conversations/([^/]+)/messages
                     $files[] = $filePayload($ref);
                 }
             }
-            $messages[] = ['role' => $message->role(), 'content' => $message->content(), 'created_at' => $message->createdAt(), 'files' => $files];
+            $question = $message->metadata() !== null ? $message->metadata()->question() : null;
+            $messages[] = [
+                'role' => $message->role(),
+                'content' => $message->content(),
+                'created_at' => $message->createdAt(),
+                'files' => $files,
+                'options' => $question !== null ? $question->options() : [],
+            ];
         }
         echo json_encode(['messages' => $messages]);
     } catch (\Osos\Gaith\Sdk\Exceptions\GaithNotFoundException $e) {

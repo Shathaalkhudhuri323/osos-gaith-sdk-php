@@ -27,12 +27,11 @@
       return { 'Accept-Language': lang };
     };
 
+    // Clickable options come from the chatbot itself when it asks a clarifying question
+    // (GAITH chatbot setting "follow-up questions"). A host can still add fixed starter
+    // buttons with quickOptions: { en: [...], ar: [...] } - this demo does not.
     chat.options = {
-      welcomeMessage: { en: 'Hello! I am GAITH. How can I help you today?', ar: 'مرحبا! أنا غيث. كيف يمكنني مساعدتك اليوم؟' },
-      quickOptions: {
-        en: ['What can you do?', 'Show the photos of incident 42', 'Show my pending approvals'],
-        ar: ['ماذا يمكنك أن تفعل؟', 'اعرض صور الحادث 42', 'إظهار الموافقات المعلقة']
-      }
+      welcomeMessage: { en: 'Hello! I am GAITH. How can I help you today?', ar: 'مرحبا! أنا غيث. كيف يمكنني مساعدتك اليوم؟' }
     };
 
     chat.addEventListener('gaith-chat:error', function (e) { console.warn('gaith-chat error', e.detail.code); });

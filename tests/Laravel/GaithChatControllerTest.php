@@ -181,9 +181,9 @@ final class GaithChatControllerTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertExactJson(['messages' => [
-            ['role' => 'user', 'content' => 'hi', 'created_at' => '2026-01-01T00:00:01Z', 'files' => []],
-            ['role' => 'assistant', 'content' => 'hello', 'created_at' => '2026-01-01T00:00:02Z', 'files' => []],
-            ['role' => 'user', 'content' => 'more', 'created_at' => '2026-01-01T00:00:03Z', 'files' => []],
+            ['role' => 'user', 'content' => 'hi', 'created_at' => '2026-01-01T00:00:01Z', 'files' => [], 'options' => []],
+            ['role' => 'assistant', 'content' => 'hello', 'created_at' => '2026-01-01T00:00:02Z', 'files' => [], 'options' => []],
+            ['role' => 'user', 'content' => 'more', 'created_at' => '2026-01-01T00:00:03Z', 'files' => [], 'options' => []],
         ]]);
         // Each page continues after the last seq seen, always as the signed-in user.
         $this->assertStringNotContainsString('after_seq', $this->sentQueries[0]);
@@ -370,6 +370,43 @@ final class GaithChatControllerTest extends TestCase
     public function testFileRouteRefusesUnauthenticatedCallers(): void
     {
         $this->getJson('/api/gaith/files/6910c7b6-6e62-4498-b880-611d2b159ba9')->assertStatus(401);
+    }
+
+    public function testItRelaysAClarifyingQuestionWithItsOptions(): void
+    {
+        $this->signIn();
+        $this->bindStreaming([
+            "event: meta\ndata: {\"conversation_id\":\"c1\",\"user_message_id\":\"um1\",\"stream_id\":\"s1\"}\n\n",
+            "event: token\ndata: {\"content\":\"Which month?\"}\n\n",
+            "event: question\ndata: {\"id\":\"call_1\",\"question\":\"Which month?\",\"options\":[\"October\",\"November\"]}\n\n",
+            "event: done\ndata: {\"message_id\":\"m1\",\"conversation_id\":\"c1\",\"finish_reason\":\"question\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n",
+        ]);
+
+        $body = $this->post('/api/gaith/stream', ['message' => 'show my leave'])->streamedContent();
+
+        $this->assertStringContainsString(
+            "event: question\ndata: {\"question\":\"Which month?\",\"options\":[\"October\",\"November\"]}\n\n",
+            $body
+        );
+        $this->assertStringContainsString('"finish_reason":"question"', $body);
+    }
+
+    public function testHistoryKeepsTheOptionsOfAClarifyingQuestion(): void
+    {
+        $this->signIn();
+        $pages = [[
+            array_merge($this->messageRow('assistant', 'Which month?', 1), ['metadata' => [
+                'finish_reason' => 'question',
+                'tool_events' => [['event' => 'question', 'id' => 'call_1', 'question' => 'Which month?', 'options' => ['October', 'November']]],
+            ]]),
+        ], []];
+        $this->bindJson(function () use (&$pages) {
+            return array_shift($pages);
+        });
+
+        $messages = $this->getJson('/api/gaith/conversations/c1/messages')->json('messages');
+
+        $this->assertSame(['October', 'November'], $messages[0]['options']);
     }
 
     public function testHistoryIncludesUploadsAndToolFiles(): void

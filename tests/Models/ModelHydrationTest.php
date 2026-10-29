@@ -72,6 +72,22 @@ final class ModelHydrationTest extends TestCase
         $this->assertSame([], $metadata->files());
     }
 
+    public function testMetadataExposesTheClarifyingQuestionGaithSaved(): void
+    {
+        // As GAITH persists it on the assistant message: tool_events plus finish_reason.
+        $metadata = MessageMetadata::fromArray([
+            'finish_reason' => 'question',
+            'tool_events' => [
+                ['event' => 'tool_call', 'id' => 'c0', 'tool' => 'lookup'],
+                ['event' => 'question', 'id' => 'c1', 'question' => 'Which month?', 'options' => ['October', 'November']],
+            ],
+        ]);
+
+        $this->assertSame('Which month?', $metadata->question()->question());
+        $this->assertSame(['October', 'November'], $metadata->question()->options());
+        $this->assertNull(MessageMetadata::fromArray(['files' => []])->question());
+    }
+
     public function testMessageMetadataFromArrayWithAttachmentsAndFiles(): void
     {
         $fileData = [

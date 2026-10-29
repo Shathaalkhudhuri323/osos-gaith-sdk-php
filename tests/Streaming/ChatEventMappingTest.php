@@ -9,6 +9,7 @@ use Osos\Gaith\Sdk\Streaming\ErrorEvent;
 use Osos\Gaith\Sdk\Streaming\FileEvent;
 use Osos\Gaith\Sdk\Streaming\LimitEvent;
 use Osos\Gaith\Sdk\Streaming\MetaEvent;
+use Osos\Gaith\Sdk\Streaming\QuestionEvent;
 use Osos\Gaith\Sdk\Streaming\SafetyBlockEvent;
 use Osos\Gaith\Sdk\Streaming\SseFrame;
 use Osos\Gaith\Sdk\Streaming\TokenEvent;
@@ -124,6 +125,24 @@ final class ChatEventMappingTest extends TestCase
 
         $this->assertInstanceOf(SafetyBlockEvent::class, $event);
         $this->assertTrue($event->isTerminal());
+    }
+
+    public function testQuestionEventCarriesClickableOptions(): void
+    {
+        // GAITH's present_options tool (AII-3768): a clarifying question with 2-6 labels.
+        $frame = new SseFrame(null, 'question', json_encode([
+            'id' => 'call_1',
+            'question' => 'Which month?',
+            'options' => ['October', ' November ', '', 7],
+        ]));
+
+        $event = ChatEvent::fromFrame($frame);
+
+        $this->assertInstanceOf(QuestionEvent::class, $event);
+        $this->assertSame('call_1', $event->id());
+        $this->assertSame('Which month?', $event->question()->question());
+        $this->assertSame(['October', 'November'], $event->question()->options()); // non-strings and blanks dropped
+        $this->assertFalse($event->isTerminal()); // the turn still ends with `done`
     }
 
     public function testUnknownEventNameReturnsNull(): void

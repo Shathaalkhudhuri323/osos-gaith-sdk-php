@@ -27,6 +27,7 @@ use Osos\Gaith\Sdk\Streaming\FileEvent;
 use Osos\Gaith\Sdk\Streaming\HeartbeatEvent;
 use Osos\Gaith\Sdk\Streaming\LimitEvent;
 use Osos\Gaith\Sdk\Streaming\MetaEvent;
+use Osos\Gaith\Sdk\Streaming\QuestionEvent;
 use Osos\Gaith\Sdk\Streaming\SafetyBlockEvent;
 use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\TokenEvent;
@@ -365,6 +366,8 @@ final class GaithChatController extends Controller
                 foreach ($page as $message) {
                     $files = [];
                     $metadata = $message->metadata();
+                    // A clarifying question's clickable options, so a reload can show them again.
+                    $question = $metadata !== null ? $metadata->question() : null;
                     if ($metadata !== null) {
                         // The user's uploads and the files tools produced, by artifact id;
                         // the widget fetches them through the file route above.
@@ -377,6 +380,7 @@ final class GaithChatController extends Controller
                         'content' => $message->content(),
                         'created_at' => $message->createdAt(),
                         'files' => $files,
+                        'options' => $question !== null ? $question->options() : [],
                     ];
                     $afterSeq = $message->seq();
                 }
@@ -488,6 +492,7 @@ final class GaithChatController extends Controller
         if ($event instanceof ToolCallEvent) { return 'tool_call'; }
         if ($event instanceof ToolResultEvent) { return 'tool_result'; }
         if ($event instanceof SafetyBlockEvent) { return 'safety_block'; }
+        if ($event instanceof QuestionEvent) { return 'question'; }
 
         return 'unknown';
     }
@@ -527,6 +532,9 @@ final class GaithChatController extends Controller
         }
         if ($event instanceof ToolResultEvent) {
             return ['tool' => $event->tool(), 'ok' => $event->ok()];
+        }
+        if ($event instanceof QuestionEvent) {
+            return ['question' => $event->question()->question(), 'options' => $event->question()->options()];
         }
 
         return [];

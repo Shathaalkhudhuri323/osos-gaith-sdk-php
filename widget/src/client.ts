@@ -29,6 +29,8 @@ export interface TurnHandlers {
   onToken(content: string): void;
   onFile(file: ChatFile): void;
   onNotice(kind: 'limit' | 'tool', detail: string): void;
+  /** The bot asks a clarifying question; these labels are offered as buttons. */
+  onQuestion(options: string[]): void;
   onDone(conversationId: string | null): void;
   /** code is for logging; the widget shows its own localized text. */
   onError(code: string): void;
@@ -39,6 +41,19 @@ export interface HistoryMessage {
   content: string;
   created_at: string;
   files?: ChatFile[];
+  /** Clickable answers to a clarifying question this reply asked. */
+  options?: string[];
+}
+
+/** Clean, distinct option labels; GAITH sends 2-6, anything malformed is dropped. */
+export function toOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) { return []; }
+  const options: string[] = [];
+  for (const item of value) {
+    const label = typeof item === 'string' ? item.trim() : '';
+    if (label && options.indexOf(label) === -1) { options.push(label); }
+  }
+  return options.slice(0, 6);
 }
 
 /** Keeps only well-formed file entries; anything else from the wire is dropped. */
@@ -129,6 +144,12 @@ export function streamTurn(
       case 'tool_call':
         handlers.onNotice('tool', String(data.tool || ''));
         break;
+      case 'question': {
+        // The question itself also arrives as tokens; this adds its answer buttons.
+        const options = toOptions(data.options);
+        if (options.length >= 2) { handlers.onQuestion(options); }
+        break;
+      }
       case 'file': {
         const file = toChatFile(data);
         if (file) { handlers.onFile(file); }

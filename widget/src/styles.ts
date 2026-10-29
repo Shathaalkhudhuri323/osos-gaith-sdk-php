@@ -39,19 +39,24 @@ export const STYLES = `
 .root[dir="rtl"] { right: auto; left: var(--gaith-chat-side); align-items: flex-start; }
 
 /* ---------- Launcher ---------- */
+/* Small sparkles button in a see-through product colour (blurred behind, so it stays
+   legible over any page); fully solid on hover and while the chat is open. */
 .launcher {
-  width: 60px; height: 60px; border: 0; border-radius: 50%; padding: 0; overflow: hidden;
+  width: 48px; height: 48px; border: 0; border-radius: 50%; padding: 0; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
-  background: var(--p); color: var(--on-p);
+  background: var(--p); background: color-mix(in srgb, var(--p) 70%, transparent); color: var(--on-p);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(16,24,40,.22);
-  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+  box-shadow: 0 4px 12px rgba(16,24,40,.16);
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease, background-color .2s ease;
 }
-.launcher:hover { transform: translateY(-2px) scale(1.04); }
+.launcher:hover, .launcher.open { background: var(--p); }
+.launcher:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 16px rgba(16,24,40,.2); }
 .launcher:active { transform: scale(.96); }
-.launcher.has-image:not(.open) { background: transparent; box-shadow: 0 6px 16px rgba(16,24,40,.2); }
-.launcher img { width: 44px; height: 44px; object-fit: contain; display: block; pointer-events: none; }
-.launcher svg { width: 26px; height: 26px; animation: spin-in .25s cubic-bezier(.2,.8,.2,1); }
+.launcher.has-image:not(.open) { background: transparent; box-shadow: 0 4px 12px rgba(16,24,40,.16); }
+.launcher img { width: 34px; height: 34px; object-fit: contain; display: block; pointer-events: none; }
+.launcher svg { width: 30px; height: 30px; animation: spin-in .25s cubic-bezier(.2,.8,.2,1); }
+.launcher.open svg { width: 18px; height: 18px; }
 @keyframes spin-in { from { transform: rotate(-90deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Panel ---------- */
@@ -68,49 +73,50 @@ export const STYLES = `
 .panel[hidden] { display: none; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
 
-/* ---------- Header ---------- */
-/* Compact, solid product colour - no gradient, so it matches any product's brand as-is. */
+/* ---------- Panel controls ---------- */
+/* The panel has no visual header; only its two controls float at the top-right. */
 .header {
-  display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
-  padding: 10px 10px 10px 14px;
-  background: var(--p); color: var(--on-p);
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  display: flex; align-items: center; padding: 0;
+  background: transparent; color: var(--muted); direction: ltr;
 }
-.root[dir="rtl"] .header { padding: 10px 14px 10px 10px; }
-.avatar {
-  position: relative; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,.18);
+.root[dir="rtl"] .header { right: 10px; left: auto; }
+/* Status in the same row as the refresh/close buttons, centred with them - no header bar. */
+.header { gap: 6px; }
+.status {
+  display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px;
+  font-size: 12px; line-height: 1; color: var(--muted); white-space: nowrap;
 }
-.avatar svg { width: 16px; height: 16px; }
-.status { position: absolute; bottom: -1px; right: -1px; display: flex; }
-.root[dir="rtl"] .status { right: auto; left: -1px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 2px var(--p); }
-.dot.busy { background: #fbbf24; animation: pulse 1s ease-in-out infinite; }
-.dot.error { background: #f87171; animation: none; }
+.dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+.dot.busy { background: #f59e0b; animation: pulse 1s ease-in-out infinite; }
+.dot.error { background: #ef4444; animation: none; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
-.heading { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.title { font-size: 13.5px; font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.subtitle { font-size: 11px; opacity: .8; line-height: 1.2; }
 
-.actions { display: flex; align-items: center; gap: 2px; }
+.actions {
+  display: flex; align-items: center; gap: 1px;
+  background: transparent;
+}
 .action {
   width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; color: inherit; cursor: pointer; opacity: .9;
+  background: transparent; color: #4b5563; cursor: pointer; opacity: .9;
   transition: background-color .15s ease, opacity .15s ease;
 }
-.action:hover { background: rgba(255,255,255,.16); opacity: 1; }
-.action svg { width: 15px; height: 15px; }
+.action:hover { background: rgba(16,24,40,.06); color: var(--p); opacity: 1; }
+.action:focus-visible { opacity: 1; }
+.action svg { width: 16px; height: 16px; }
 
 /* ---------- Messages ---------- */
 .messages {
-  flex: 1 1 auto; padding: 18px 16px 8px; overflow-y: auto; background: var(--surface);
+  /* Top padding clears the floating status/buttons row so it never covers a message. */
+  flex: 1 1 auto; padding: 48px 16px 8px; overflow-y: auto; background: var(--surface);
   scrollbar-width: thin; scrollbar-color: #cfd4da transparent;
 }
 .messages::-webkit-scrollbar { width: 6px; }
 .messages::-webkit-scrollbar-thumb { background: #cfd4da; border-radius: 3px; }
 .message { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 14px; animation: rise .2s ease; }
 .message.bot { align-items: flex-start; }
+.message.welcome { min-height: 32px; padding-right: 64px; }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .bubble {
   max-width: 82%; padding: 10px 14px; border-radius: 18px 18px 6px 18px;
@@ -229,7 +235,17 @@ export const STYLES = `
 .option:disabled { opacity: .5; cursor: default; }
 
 /* ---------- Composer ---------- */
-.composer { flex: 0 0 auto; padding: 12px 14px 14px; background: #fff; border-top: 1px solid var(--line); }
+.composer {
+  flex: 0 0 auto; padding: 10px 14px 14px;
+  background: #f7f9fc; border-top: 1px solid #edf0f5;
+}
+.composer-meta { display: flex; justify-content: flex-end; min-height: 18px; margin: 0 4px 7px; }
+.powered {
+  display: inline-flex; align-items: center; gap: 5px; direction: ltr;
+  color: #7a8495; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+}
+.powered svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--p); }
+.powered-label { unicode-bidi: plaintext; }
 
 /* Attached files waiting to be sent: chips above the input. */
 .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; max-height: 120px; overflow-y: auto; }
@@ -263,13 +279,12 @@ export const STYLES = `
 .chip-remove:hover { background: rgba(16,24,40,.08); color: var(--ink); }
 .chip-remove svg { width: 12px; height: 12px; }
 
-/* Paperclip inside the input bar. */
+/* Attachment action, presented as the plus control inside the input bar. */
 .attach {
-  flex: 0 0 auto; width: 36px; height: 36px; margin: 0 0 0 -10px; padding: 0; border: 0; border-radius: 50%;
+  flex: 0 0 auto; width: 38px; height: 38px; margin: 0; padding: 0; border: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   background: transparent; color: var(--muted); cursor: pointer; transition: background-color .15s ease, color .15s ease;
 }
-.root[dir="rtl"] .attach { margin: 0 -10px 0 0; }
 .attach[hidden] { display: none; }
 .attach:hover:not(:disabled) { background: var(--p-soft); color: var(--p); }
 .attach:disabled { opacity: .45; cursor: default; }
@@ -286,19 +301,20 @@ export const STYLES = `
 }
 .drop-hint[hidden] { display: none; }
 .composer-box {
-  display: flex; align-items: flex-end; gap: 8px; padding: 6px 6px 6px 16px;
-  border-radius: 24px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line);
+  display: flex; align-items: center; gap: 8px; min-height: 62px; padding: 10px 10px 10px 12px;
+  border-radius: 20px; background: #fff;
+  box-shadow: 0 0 0 1px #e4e8ef, 0 8px 24px rgba(31,41,55,.07);
   transition: box-shadow .15s ease, background-color .15s ease;
 }
-.root[dir="rtl"] .composer-box { padding: 6px 16px 6px 6px; }
-.composer-box:focus-within { background: #fff; box-shadow: inset 0 0 0 1.5px var(--p), 0 0 0 4px var(--p-soft); }
+.root[dir="rtl"] .composer-box { padding: 10px 12px 10px 10px; }
+.composer-box:focus-within { box-shadow: 0 0 0 1.5px var(--p), 0 8px 24px rgba(31,41,55,.09), 0 0 0 4px var(--p-soft); }
 .input {
-  flex: 1 1 auto; height: 36px; max-height: 120px; min-height: 36px; padding: 8px 0; resize: none; overflow-y: auto;
+  flex: 1 1 auto; height: 40px; max-height: 120px; min-height: 40px; padding: 10px 0; resize: none; overflow-y: auto;
   border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 20px; outline: none;
 }
-.input::placeholder { color: #9aa1ab; }
+.input::placeholder { color: #8490a3; opacity: 1; }
 .send {
-  flex: 0 0 auto; width: 36px; height: 36px; border: 0; border-radius: 50%;
+  flex: 0 0 auto; width: 40px; height: 40px; border: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   background: var(--p); color: var(--on-p); cursor: pointer;
   transition: transform .15s ease, opacity .15s ease, background-color .15s ease;
@@ -308,7 +324,7 @@ export const STYLES = `
 .send svg { width: 16px; height: 16px; }
 .root[dir="rtl"] .send svg { transform: scaleX(-1); }
 button:focus-visible { outline: 2px solid var(--p); outline-offset: 2px; }
-.header button:focus-visible { outline-color: var(--on-p); }
+.header button:focus-visible { outline-color: var(--p); }
 
 @media (max-width: 575px) {
   .root { right: 12px; }

@@ -1,6 +1,6 @@
 import {
   AttachmentRules, ChatFile, fetchConfig, fetchFile, fetchHistory, HeaderProvider, NO_ATTACHMENTS, streamTurn,
-  toChatFile, Turn, uploadFile,
+  toChatFile, toOptions, Turn, uploadFile,
 } from './client';
 import { Lang, normalizeLang, pick, strings } from './i18n';
 import { ImageGate, imageGate, renderMarkdown } from './render';
@@ -11,6 +11,8 @@ export interface GaithChatOptions {
   welcomeMessage?: Partial<Record<Lang, string>>;
   errorMessage?: Partial<Record<Lang, string>>;
   quickOptions?: Partial<Record<Lang, string[]>>;
+  /** Example or instruction shown inside the empty composer. */
+  placeholder?: Partial<Record<Lang, string>>;
 }
 
 interface Message {
@@ -21,6 +23,8 @@ interface Message {
   notice?: string;
   /** Files on this message: the user's uploads, or files a tool produced. */
   files: ChatFile[];
+  /** A bot reply that asked a clarifying question: its clickable answers. */
+  options?: string[];
 }
 
 type Status = 'idle' | 'streaming' | 'error';
@@ -64,12 +68,11 @@ const PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const OPEN_TYPES = PREVIEW_TYPES.concat(['application/pdf']);
 
 const ICONS = {
-  chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.4 9.4 0 0 1-4-.9L3 20l1.3-4A8.2 8.2 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5z"/><path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01" stroke-width="2.6"/></svg>',
   bot: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".8"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
   send: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>',
-  attach: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.1l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>',
+  attach: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   remove: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>',
   open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>',
@@ -130,10 +133,11 @@ export class GaithChatElement extends HTMLElement {
   /** Initial config + history load; 'failed' means auth was missing and it retries once getHeaders is set. */
   private loadState: 'idle' | 'scheduled' | 'loading' | 'done' | 'failed' = 'idle';
   private els!: {
-    container: HTMLElement; panel: HTMLElement; title: HTMLElement; subtitle: HTMLElement; dot: HTMLElement;
+    container: HTMLElement; panel: HTMLElement;
     list: HTMLElement; input: HTMLTextAreaElement; send: HTMLButtonElement; launcher: HTMLButtonElement;
     reset: HTMLButtonElement; close: HTMLButtonElement;
     attach: HTMLButtonElement; fileInput: HTMLInputElement; attachments: HTMLElement; dropHint: HTMLElement;
+    powered: HTMLElement; dot: HTMLElement; statusLabel: HTMLElement;
   };
 
   constructor() {
@@ -159,7 +163,10 @@ export class GaithChatElement extends HTMLElement {
 
   set options(value: GaithChatOptions) {
     this._options = value || {};
-    if (this.els) { this.renderMessages(); }
+    if (this.els) {
+      this.applyLanguage();
+      this.renderMessages();
+    }
   }
 
   private get endpoint(): string {
@@ -376,6 +383,10 @@ export class GaithChatElement extends HTMLElement {
         reply.text += content;
         this.queueRender();
       },
+      onQuestion: (options) => {
+        reply.options = options;
+        this.queueRender();
+      },
       onFile: (file) => {
         reply.files.push(file);
         this.queueRender();
@@ -437,6 +448,7 @@ export class GaithChatElement extends HTMLElement {
           text: m.content,
           sentAt: m.created_at ? new Date(m.created_at) : null,
           files: (Array.isArray(m.files) ? m.files : []).map(toChatFile).filter((f): f is ChatFile => f !== null),
+          options: m.role === 'user' ? undefined : toOptions(m.options),
         }));
         this.renderMessages();
       }
@@ -459,11 +471,7 @@ export class GaithChatElement extends HTMLElement {
       <div class="root pending" part="root">
         <div class="panel" part="panel" role="dialog" hidden>
           <div class="header" part="header">
-            <span class="avatar">${ICONS.bot}<span class="status"><span class="dot"></span></span></span>
-            <span class="heading">
-              <span class="title"></span>
-              <span class="subtitle" role="status" aria-live="polite"></span>
-            </span>
+            <span class="status" role="status" aria-live="polite"><span class="dot"></span><span class="status-label" dir="auto"></span></span>
             <span class="actions">
               <button type="button" class="action reset">${ICONS.reset}</button>
               <button type="button" class="action close">${ICONS.close}</button>
@@ -471,6 +479,9 @@ export class GaithChatElement extends HTMLElement {
           </div>
           <div class="messages" part="messages" aria-live="polite"></div>
           <div class="composer">
+            <div class="composer-meta">
+              <span class="powered">${ICONS.bot}<span class="powered-label" dir="auto"></span></span>
+            </div>
             <div class="attachments" hidden></div>
             <div class="composer-box">
               <button type="button" class="attach" hidden>${ICONS.attach}</button>
@@ -486,9 +497,10 @@ export class GaithChatElement extends HTMLElement {
 
     const q = <T extends Element>(selector: string) => this.root.querySelector(selector) as unknown as T;
     this.els = {
-      container: q('.root'), panel: q('.panel'), title: q('.title'), subtitle: q('.subtitle'), dot: q('.dot'), list: q('.messages'),
+      container: q('.root'), panel: q('.panel'), list: q('.messages'),
       input: q('.input'), send: q('.send'), launcher: q('.launcher'), reset: q('.reset'), close: q('.close'),
       attach: q('.attach'), fileInput: q('.file-input'), attachments: q('.attachments'), dropHint: q('.drop-hint'),
+      powered: q('.powered-label'), dot: q('.dot'), statusLabel: q('.status-label'),
     };
 
     this.els.attach.addEventListener('click', () => this.els.fileInput.click());
@@ -541,9 +553,9 @@ export class GaithChatElement extends HTMLElement {
   private applyLanguage(): void {
     const t = strings(this.language);
     this.els.container.setAttribute('dir', this.language === 'ar' ? 'rtl' : 'ltr');
-    this.els.title.textContent = this.getAttribute('bot-name') || t.chat;
-    this.els.panel.setAttribute('aria-label', this.els.title.textContent);
-    this.els.input.placeholder = t.placeholder;
+    this.els.panel.setAttribute('aria-label', this.getAttribute('bot-name') || t.chat);
+    this.els.input.placeholder = pick(this._options.placeholder, this.language) || t.placeholder;
+    this.els.powered.textContent = t.poweredBy;
     this.labelButton(this.els.send, t.send);
     this.labelButton(this.els.reset, t.reset);
     this.labelButton(this.els.close, t.close);
@@ -572,7 +584,7 @@ export class GaithChatElement extends HTMLElement {
       img.alt = '';
       this.els.launcher.replaceChildren(img);
     } else {
-      this.els.launcher.innerHTML = ICONS.chat;
+      this.els.launcher.innerHTML = ICONS.bot; // the GAITH sparkles
     }
   }
 
@@ -594,7 +606,8 @@ export class GaithChatElement extends HTMLElement {
     const children: HTMLElement[] = [];
 
     const visible: Message[] = this.messages.slice();
-    const welcome = pick(this._options.welcomeMessage, this.language);
+    const configuredWelcome = pick(this._options.welcomeMessage, this.language);
+    const welcome = configuredWelcome === undefined ? t.welcome : configuredWelcome;
     if (visible.length === 0 && welcome) {
       if (!this.welcomeMessage || this.welcomeMessage.text !== welcome) {
         this.welcomeMessage = { author: 'bot', text: welcome, sentAt: null, files: [] };
@@ -622,33 +635,45 @@ export class GaithChatElement extends HTMLElement {
 
     const quickOptions = pick(this._options.quickOptions, this.language) || [];
     if (quickOptions.length > 0 && !this.messages.some((m) => m.author === 'user')) {
-      const options = document.createElement('div');
-      options.className = 'options';
-      for (const option of quickOptions) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'option';
-        button.textContent = option;
-        button.disabled = this.status === 'streaming';
-        button.addEventListener('click', () => this.send(option));
-        options.appendChild(button);
-      }
-      children.push(options);
+      children.push(this.optionButtons(quickOptions, 'options'));
+    }
+
+    // A clarifying question's answers, only under the latest reply: once the user
+    // answers (or writes anything else) the question is settled and they go away.
+    const last = this.messages[this.messages.length - 1];
+    if (last && last.author === 'bot' && last.options && last.options.length && this.status !== 'streaming') {
+      children.push(this.optionButtons(last.options, 'options answers'));
     }
 
     // Moving existing nodes keeps loaded images; only changed rows were rebuilt.
     list.replaceChildren(...children);
 
+    // Status beside the refresh/close buttons: follows the current turn.
     this.els.dot.className = 'dot' + (this.status === 'streaming' ? ' busy' : this.status === 'error' ? ' error' : '');
-    const statusLabel = this.status === 'streaming' ? t.thinking : this.status === 'error' ? t.unavailable : t.online;
-    this.els.subtitle.textContent = statusLabel;
-    this.els.dot.parentElement!.setAttribute('title', statusLabel);
+    this.els.statusLabel.textContent = this.status === 'streaming' ? t.thinking : this.status === 'error' ? t.unavailable : t.online;
+
     this.fitInput();
     this.renderComposer();
 
     if (nearBottom || this.status === 'streaming') {
       list.scrollTop = list.scrollHeight;
     }
+  }
+
+  /** Clickable chips; a click sends the label as the user's message. */
+  private optionButtons(labels: string[], className: string): HTMLElement {
+    const box = document.createElement('div');
+    box.className = className;
+    for (const label of labels) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'option';
+      button.textContent = label;
+      button.disabled = this.status === 'streaming';
+      button.addEventListener('click', () => this.send(label));
+      box.appendChild(button);
+    }
+    return box;
   }
 
   /** The message's row, rebuilt only when something visible about it changed. */
@@ -670,6 +695,7 @@ export class GaithChatElement extends HTMLElement {
   private buildRow(message: Message, previous: HTMLElement | null): HTMLElement {
     const row = document.createElement('div');
     row.className = 'message' + (message.author === 'bot' ? ' bot' : '');
+    if (message === this.welcomeMessage) { row.classList.add('welcome'); }
 
     if (message.text) {
       const bubble = document.createElement('div');
