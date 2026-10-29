@@ -13,10 +13,14 @@ final class SseFrame
     /** @var string */
     public $data;
 
-    public function __construct(?string $id, ?string $event, string $data)
+    /** @var bool True for a frame that carried only comment lines, such as a heartbeat. */
+    public $isComment;
+
+    public function __construct(?string $id, ?string $event, string $data, bool $isComment = false)
     {
         $this->id = $id;
         $this->event = $event;
         $this->data = $data;
+        $this->isComment = $isComment;
     }
 }

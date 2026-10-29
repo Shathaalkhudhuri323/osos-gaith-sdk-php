@@ -87,10 +87,19 @@ class GaithHttpTransport
     /**
      * @return array<string, mixed>
      */
-    public function postMultipart(string $path, string $fileContents, string $filename, string $externalUserId): array
+    /**
+     * @param string|null $mediaType The file part's Content-Type. GAITH stores and validates
+     *                               the upload by it; when null the builder guesses from the
+     *                               filename's extension, and a name without one is sent untyped.
+     */
+    public function postMultipart(string $path, string $fileContents, string $filename, string $externalUserId, ?string $mediaType = null): array
     {
         $builder = new \Http\Message\MultipartStream\MultipartStreamBuilder($this->streamFactory);
-        $builder->addResource('file', $fileContents, ['filename' => $filename]);
+        $options = ['filename' => $filename];
+        if ($mediaType !== null && $mediaType !== '') {
+            $options['headers'] = ['Content-Type' => $mediaType];
+        }
+        $builder->addResource('file', $fileContents, $options);
         $builder->addResource('external_user_id', $externalUserId);
 
         $boundary = $builder->getBoundary();
@@ -105,10 +114,16 @@ class GaithHttpTransport
 
     public function getRaw(string $path, string $queryString = ''): \Psr\Http\Message\StreamInterface
     {
-        $request = $this->buildRequest('GET', $path, $queryString);
-        $response = $this->send($request);
+        return $this->getRawResponse($path, $queryString)->getBody();
+    }
 
-        return $response->getBody();
+    /**
+     * Like getRaw(), but keeps the response headers (Content-Type, Content-Disposition)
+     * for callers that serve the bytes onward.
+     */
+    public function getRawResponse(string $path, string $queryString = ''): ResponseInterface
+    {
+        return $this->send($this->buildRequest('GET', $path, $queryString));
     }
 
     /**

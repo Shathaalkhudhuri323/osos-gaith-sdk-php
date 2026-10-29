@@ -54,6 +54,40 @@ final class ModelHydrationTest extends TestCase
         $this->assertSame('https://example.test/a1', $file->downloadUrl());
     }
 
+    public function testUserUploadRefsWithoutDownloadUrlHydrate(): void
+    {
+        // GAITH stores a user's uploaded attachments on the message without a
+        // download_url (chatbot/attachments.py resolve_input_refs); getMessages()
+        // must not crash on any conversation where the user attached a file.
+        $metadata = MessageMetadata::fromArray(['attachments' => [[
+            'artifact_id' => 'a1',
+            'filename' => 'photo.jpg',
+            'media_type' => 'image/jpeg',
+            'size_bytes' => 2048,
+        ]]]);
+
+        $ref = $metadata->attachments()[0];
+        $this->assertSame('photo.jpg', $ref->filename());
+        $this->assertNull($ref->downloadUrl());
+        $this->assertSame([], $metadata->files());
+    }
+
+    public function testMetadataExposesTheClarifyingQuestionGaithSaved(): void
+    {
+        // As GAITH persists it on the assistant message: tool_events plus finish_reason.
+        $metadata = MessageMetadata::fromArray([
+            'finish_reason' => 'question',
+            'tool_events' => [
+                ['event' => 'tool_call', 'id' => 'c0', 'tool' => 'lookup'],
+                ['event' => 'question', 'id' => 'c1', 'question' => 'Which month?', 'options' => ['October', 'November']],
+            ],
+        ]);
+
+        $this->assertSame('Which month?', $metadata->question()->question());
+        $this->assertSame(['October', 'November'], $metadata->question()->options());
+        $this->assertNull(MessageMetadata::fromArray(['files' => []])->question());
+    }
+
     public function testMessageMetadataFromArrayWithAttachmentsAndFiles(): void
     {
         $fileData = [

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gaith-chat demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #23282c; }
+    /* Colours come from GAITH_CHAT_WIDGET_PRIMARY_COLOR / _TEXT_COLOR via /api/gaith/config.
+       A page can still override them: gaith-chat { --gaith-chat-primary: #0a7d38; } */
+  </style>
+  <script src="/gaith-chat.js"></script>
+</head>
+<body>
+  <h1>&lt;gaith-chat&gt; demo</h1>
+  <p>The chat button is in the bottom corner. <a href="?lang=ar">العربية</a> · <a href="?lang=en">English</a></p>
+
+  <gaith-chat endpoint="api/gaith" bot-name="GAITH"></gaith-chat>
+
+  <script>
+    var chat = document.querySelector('gaith-chat');
+    var lang = new URLSearchParams(location.search).get('lang') || 'en';
+    chat.setAttribute('lang', lang);
+
+    // A real host returns its own auth headers here (bearer token, CSRF/signature).
+    chat.getHeaders = function (request) {
+      return { 'Accept-Language': lang };
+    };
+
+    // Clickable options come from the chatbot itself when it asks a clarifying question
+    // (GAITH chatbot setting "follow-up questions"). A host can still add fixed starter
+    // buttons with quickOptions: { en: [...], ar: [...] } - this demo does not.
+    chat.options = {
+      welcomeMessage: { en: 'Hello! I am GAITH. How can I help you today?', ar: 'مرحبا! أنا غيث. كيف يمكنني مساعدتك اليوم؟' }
+    };
+
+    chat.addEventListener('gaith-chat:error', function (e) { console.warn('gaith-chat error', e.detail.code); });
+  </script>
+</body>
+</html>

