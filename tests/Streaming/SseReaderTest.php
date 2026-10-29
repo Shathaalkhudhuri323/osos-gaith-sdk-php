@@ -73,15 +73,19 @@ final class SseReaderTest extends TestCase
         $this->assertSame("line1\nline2", $frames[0]->data);
     }
 
-    public function testCommentLinesAreIgnored(): void
+    public function testCommentLinesInsideAnEventFrameAreIgnored(): void
     {
-        $handle = $this->handleFor([":heartbeat\n\nevent: done\ndata: {}\n\n"]);
+        // Comment-only frames are keep-alives and are surfaced (see HeartbeatTest);
+        // a comment line mixed into a real event must not alter that event.
+        $handle = $this->handleFor([": note\nevent: done\ndata: {}\n\n"]);
         $reader = new SseReader();
 
         $frames = iterator_to_array($reader->read($handle));
 
         $this->assertCount(1, $frames);
         $this->assertSame('done', $frames[0]->event);
+        $this->assertSame('{}', $frames[0]->data);
+        $this->assertFalse($frames[0]->isComment);
     }
 
     public function testFrameWithoutIdHasNullId(): void

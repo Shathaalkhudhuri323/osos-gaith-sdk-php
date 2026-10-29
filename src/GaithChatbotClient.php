@@ -5,6 +5,7 @@ namespace Osos\Gaith\Sdk;
 use Osos\Gaith\Sdk\Config\GaithUser;
 use Osos\Gaith\Sdk\Http\GaithHttpTransport;
 use Osos\Gaith\Sdk\Http\QueryBuilder;
+use Osos\Gaith\Sdk\Models\AttachmentDownload;
 use Osos\Gaith\Sdk\Models\AttachmentUpload;
 use Osos\Gaith\Sdk\Models\ChatbotMeta;
 use Osos\Gaith\Sdk\Models\ChatMessage;
@@ -94,7 +95,14 @@ final class GaithChatbotClient
         $this->transport->delete('conversations/' . $conversationId, $query);
     }
 
-    public function uploadAttachment(GaithUser $user, string $filePath, ?string $filename = null): AttachmentUpload
+    /**
+     * Uploads a file for a later chat turn (pass its artifact id in streamChat's
+     * `attachments` option). GAITH stores it for a limited time and validates its type.
+     *
+     * @param string|null $mediaType e.g. "image/jpeg"; pass the server-detected type when
+     *                               the file name may lack an extension
+     */
+    public function uploadAttachment(GaithUser $user, string $filePath, ?string $filename = null, ?string $mediaType = null): AttachmentUpload
     {
         $contents = file_get_contents($filePath);
         if ($contents === false) {
@@ -105,7 +113,8 @@ final class GaithChatbotClient
             'attachments',
             $contents,
             $filename ?? basename($filePath),
-            $user->id()
+            $user->id(),
+            $mediaType
         );
 
         return AttachmentUpload::fromArray($result);
@@ -116,6 +125,20 @@ final class GaithChatbotClient
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
         return $this->transport->getRaw('attachments/' . $artifactId, $query);
+    }
+
+    /**
+     * Downloads an attachment or a tool-produced file together with its media type
+     * and file name, e.g. to serve it to a browser. GAITH only returns files from
+     * this user's own conversations (404 otherwise, 410 once expired).
+     */
+    public function downloadAttachmentFile(GaithUser $user, string $artifactId): AttachmentDownload
+    {
+        $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
+
+        return AttachmentDownload::fromResponse(
+            $this->transport->getRawResponse('attachments/' . rawurlencode($artifactId), $query)
+        );
     }
 
     /**
@@ -135,6 +158,13 @@ final class GaithChatbotClient
             try {
                 try {
                     foreach ($this->sseReader->read($handle) as $frame) {
+                        if ($frame->isComment) {
+                            // Keep-alive: no content, but a relaying consumer needs to
+                            // see it to keep its own downstream connection open.
+                            yield new \Osos\Gaith\Sdk\Streaming\HeartbeatEvent();
+                            continue;
+                        }
+
                         if ($frame->id !== null) {
                             $lastEventId = $frame->id;
                         }

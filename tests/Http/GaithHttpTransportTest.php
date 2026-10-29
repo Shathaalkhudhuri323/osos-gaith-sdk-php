@@ -97,7 +97,7 @@ final class GaithHttpTransportTest extends TestCase
         }
     }
 
-    public function statusToExceptionProvider(): array
+    public static function statusToExceptionProvider(): array
     {
         return [
             [401, GaithAuthException::class],
@@ -253,6 +253,22 @@ final class GaithHttpTransportTest extends TestCase
         $this->assertStringContainsString('name="external_user_id"', $rawBody);
         $this->assertStringContainsString('user-1', $rawBody);
         $this->assertStringContainsString('file bytes', $rawBody);
+    }
+
+    public function testPostMultipartSendsAnExplicitMediaTypeOnTheFilePart(): void
+    {
+        // GAITH takes the upload's type from this part header; a name without an
+        // extension would otherwise arrive untyped and be rejected.
+        $captured = null;
+        $client = $this->fakeClient(new Response(200, [], '{"artifact_id":"a1"}'), $captured);
+        $factory = new HttpFactory();
+        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
+
+        $transport->postMultipart('attachments', 'bytes', 'scan', 'user-1', 'image/jpeg');
+
+        // The file part's own headers (before its blank line), in any order.
+        $body = (string) $captured->getBody();
+        $this->assertMatchesRegularExpression('/(?:^|\r\n)Content-Type: image\/jpeg\r\n(?:[^\r\n]+\r\n)*?Content-Disposition: form-data; name="file"; filename="scan"\r\n\r\nbytes/', $body);
     }
 
     public function testGetRawReturnsRawStream(): void

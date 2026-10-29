@@ -54,6 +54,24 @@ final class ModelHydrationTest extends TestCase
         $this->assertSame('https://example.test/a1', $file->downloadUrl());
     }
 
+    public function testUserUploadRefsWithoutDownloadUrlHydrate(): void
+    {
+        // GAITH stores a user's uploaded attachments on the message without a
+        // download_url (chatbot/attachments.py resolve_input_refs); getMessages()
+        // must not crash on any conversation where the user attached a file.
+        $metadata = MessageMetadata::fromArray(['attachments' => [[
+            'artifact_id' => 'a1',
+            'filename' => 'photo.jpg',
+            'media_type' => 'image/jpeg',
+            'size_bytes' => 2048,
+        ]]]);
+
+        $ref = $metadata->attachments()[0];
+        $this->assertSame('photo.jpg', $ref->filename());
+        $this->assertNull($ref->downloadUrl());
+        $this->assertSame([], $metadata->files());
+    }
+
     public function testMessageMetadataFromArrayWithAttachmentsAndFiles(): void
     {
         $fileData = [

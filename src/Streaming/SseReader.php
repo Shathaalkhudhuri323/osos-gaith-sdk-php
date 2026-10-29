@@ -31,10 +31,15 @@ final class SseReader
         $id = null;
         $event = null;
         $dataLines = [];
+        $sawComment = false;
 
         foreach (explode("\n", $rawFrame) as $line) {
-            if ($line === '' || strpos($line, ':') === 0) {
-                continue; // blank or comment line
+            if ($line === '') {
+                continue;
+            }
+            if (strpos($line, ':') === 0) {
+                $sawComment = true; // e.g. the server's keep-alive
+                continue;
             }
 
             if (strpos($line, 'id:') === 0) {
@@ -47,7 +52,9 @@ final class SseReader
         }
 
         if ($dataLines === [] && $event === null) {
-            return null; // e.g. a frame that was only heartbeat/comment lines
+            // A comment-only frame is a keep-alive and is reported as such; a frame
+            // with neither comment nor payload carries nothing and is dropped.
+            return $sawComment ? new SseFrame(null, null, '', true) : null;
         }
 
         return new SseFrame($id, $event, implode("\n", $dataLines));
