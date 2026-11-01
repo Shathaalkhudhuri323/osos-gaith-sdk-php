@@ -109,6 +109,17 @@ function formatSize(bytes: number): string {
   return bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+/** localStorage can throw (private windows, blocked storage); treat that as "not stored". */
+function stored(key: string | null): string | null {
+  if (!key) { return null; }
+  try {
+    const value = window.localStorage.getItem(key);
+    return value && value.trim() !== '' ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function pad(n: number): string {
   return n < 10 ? '0' + n : String(n);
 }
@@ -117,7 +128,10 @@ function pad(n: number): string {
  * <gaith-chat endpoint="api/gaith" lang="en" bot-name="GAITH"></gaith-chat>
  *
  * Talks only to the host's own backend routes (osos/gaith-sdk-php Laravel bridge),
- * never to GAITH. The host signs requests by setting `getHeaders`.
+ * never to GAITH. The host signs requests by setting `getHeaders`, or, with no
+ * JavaScript at all, names where the page keeps its sign-in token and language:
+ *
+ *   <gaith-chat token-storage-key="access_token" lang-storage-key="lang"></gaith-chat>
  */
 export class GaithChatElement extends HTMLElement {
   static get observedAttributes(): string[] {
@@ -200,7 +214,28 @@ export class GaithChatElement extends HTMLElement {
   }
 
   private get language(): Lang {
-    return normalizeLang(this.getAttribute('lang') || document.documentElement.lang);
+    return normalizeLang(
+      this.getAttribute('lang') || stored(this.getAttribute('lang-storage-key')) || document.documentElement.lang
+    );
+  }
+
+  /**
+   * The headers for each request: the host's `getHeaders` when set, otherwise a bearer
+   * token read from localStorage at `token-storage-key`. Read per request, so a token
+   * the page refreshes is used at once; it goes only to the host's own `endpoint`.
+   */
+  private get headerProvider(): HeaderProvider | null {
+    if (this._getHeaders) {
+      return this._getHeaders;
+    }
+    const key = this.getAttribute('token-storage-key');
+    if (!key) {
+      return null;
+    }
+    return (): Record<string, string> => {
+      const token = stored(key);
+      return token ? { Authorization: 'Bearer ' + token } : {};
+    };
   }
 
   private get storageKey(): string {
@@ -243,7 +278,7 @@ export class GaithChatElement extends HTMLElement {
   /** @returns false only when the request was refused for lack of auth (worth retrying). */
   private async loadTheme(): Promise<boolean> {
     try {
-      const { theme, privacy_url, voice, image_origins, attachments } = await fetchConfig(this.endpoint, this.getHeaders);
+      const { theme, privacy_url, voice, image_origins, attachments } = await fetchConfig(this.endpoint, this.headerProvider);
       this.applyTheme('--gaith-chat-theme-primary', theme.primary_color);
       this.applyTheme('--gaith-chat-theme-on-primary', theme.text_color);
       this.privacyUrl = privacy_url;
@@ -374,7 +409,7 @@ export class GaithChatElement extends HTMLElement {
       }
       this.pending.push(pending);
       if (pending.status === 'uploading') {
-        uploadFile(this.endpoint, file, this.getHeaders).then((uploaded) => {
+        uploadFile(this.endpoint, file, this.headerProvider).then((uploaded) => {
           pending.uploaded = uploaded;
           pending.status = 'ready';
           this.renderComposer();
@@ -407,7 +442,7 @@ export class GaithChatElement extends HTMLElement {
     this.status = 'streaming';
     this.renderMessages();
 
-    this.turn = streamTurn(this.endpoint, text, this.conversationId, this.getHeaders, {
+    this.turn = streamTurn(this.endpoint, text, this.conversationId, this.headerProvider, {
       onConversation: (id) => {
         this.conversationId = id;
         this.storeConversation(id);
@@ -467,7 +502,7 @@ export class GaithChatElement extends HTMLElement {
   /** @returns false only when the request was refused for lack of auth (worth retrying). */
   private async restoreHistory(conversationId: string): Promise<boolean> {
     try {
-      const history = await fetchHistory(this.endpoint, conversationId, this.getHeaders);
+      const history = await fetchHistory(this.endpoint, conversationId, this.headerProvider);
       if (history === null) {
         // Expired, deleted, or belongs to someone else (e.g. a different login in this tab).
         this.conversationId = null;
@@ -946,7 +981,7 @@ export class GaithChatElement extends HTMLElement {
   private fileUrl(file: ChatFile): Promise<string> {
     let url = this.fileUrls.get(file.artifact_id);
     if (!url) {
-      url = fetchFile(this.endpoint, file.artifact_id, this.getHeaders).then((blob) => URL.createObjectURL(blob));
+      url = fetchFile(this.endpoint, file.artifact_id, this.headerProvider).then((blob) => URL.createObjectURL(blob));
       url.catch((error: unknown) => {
         this.fileUrls.delete(file.artifact_id);
         this.fileErrors.set(file.artifact_id, error instanceof Error ? error.message : 'error');

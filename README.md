@@ -103,7 +103,8 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
    `['api', 'auth.api.keycloak', 'request.signature']`.
 3. Set `GAITH_CHAT_WIDGET_ENABLED=true`, `GAITH_CHAT_WIDGET_PREFIX=api/v1/gaith`, and tell the SDK
    who the signed-in user is (see *Who is chatting* below).
-4. `php artisan vendor:publish --tag=gaith-chat-assets` copies the widget to
+4. The chat box script is served by the SDK at `{prefix}/gaith-chat.js`. Only if you would rather serve
+   it as a static file, `php artisan vendor:publish --tag=gaith-chat-assets` copies the widget to
    `public/vendor/gaith-chat/gaith-chat.js`. Re-run it after every SDK update so widget and routes match.
 
 5. Optional: set this product's colours with `GAITH_CHAT_WIDGET_PRIMARY_COLOR` / `GAITH_CHAT_WIDGET_TEXT_COLOR`
@@ -213,8 +214,9 @@ times out `text/event-stream` responses. Heartbeats are relayed every ~15s.
 ### Frontend (any framework)
 
 ```html
-<!-- Add the SDK version so browsers fetch the new widget after each update. -->
-<script src="https://your-backend/vendor/gaith-chat/gaith-chat.js?v=0.2.0"></script>
+<!-- Served by the SDK at {prefix}/gaith-chat.js: no sign-in needed, cached 5 minutes,
+     so a `composer update` reaches users without a publish step or version in the URL. -->
+<script src="https://your-backend/api/gaith/gaith-chat.js"></script>
 
 <gaith-chat endpoint="api/v1/gaith" lang="en" bot-name="GAITH"></gaith-chat>
 ```
@@ -246,6 +248,18 @@ chat.options = {
 | `lang` | `en` or `ar` (RTL); falls back to `<html lang>` |
 | `bot-name` | Header title |
 | `launcher-icon` | Optional image URL for the floating button |
+| `token-storage-key` | localStorage key of the page's sign-in token, sent as `Authorization: Bearer …` to `endpoint` on every request (read fresh each time). Used only when `getHeaders` is not set |
+| `lang-storage-key` | localStorage key of the page's language (`en`/`ar`), used when there is no `lang` attribute |
+
+**No host JavaScript (QHSE):** the page keeps its token and language in localStorage, so the tag alone is
+enough. Put it in `index.html`; no `getHeaders`, no Angular change:
+
+```html
+<script src="https://qhse-api.example.com/api/gaith/gaith-chat.js"></script>
+<gaith-chat endpoint="https://qhse-api.example.com/api/gaith" token-storage-key="access_token" lang-storage-key="lang"></gaith-chat>
+```
+
+A host that signs requests beyond a bearer token (the ERP's request signature) still sets `getHeaders`.
 
 Methods: `open()`, `close()`, `reset()`, `send(text)`. Events: `gaith-chat:error` (`detail.code`), and
 `gaith-chat:history` when the menu at the top left is clicked (a placeholder until chat history ships).

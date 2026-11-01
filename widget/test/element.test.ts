@@ -21,6 +21,75 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('<gaith-chat> tag settings (no host JavaScript)', () => {
+  afterEach(() => localStorage.clear());
+
+  const authOf = (mock: ReturnType<typeof routeFetch>, suffix: string) => {
+    const call = mock.mock.calls.filter((c) => String(c[0]).endsWith(suffix)).pop()!;
+    return ((call[1] as RequestInit).headers as Record<string, string>).Authorization;
+  };
+
+  it('sends the token the page keeps under token-storage-key as a bearer token', async () => {
+    localStorage.setItem('access_token', 'tok-1');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    await flush(20);
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/config')).toBe('Bearer tok-1');
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer tok-1');
+  });
+
+  it('reads the token again for every request, so a refreshed token is used at once', async () => {
+    localStorage.setItem('access_token', 'old');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    await flush(20);
+    localStorage.setItem('access_token', 'new');
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer new');
+  });
+
+  it('sends no Authorization header when nothing is stored', async () => {
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/stream')).toBeUndefined();
+  });
+
+  it('lets a host getHeaders win over the tag setting', async () => {
+    localStorage.setItem('access_token', 'from-storage');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    el.getHeaders = () => ({ Authorization: 'Bearer from-host' });
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer from-host');
+  });
+
+  it('takes the language from lang-storage-key when there is no lang attribute', () => {
+    localStorage.setItem('lang', 'ar');
+    routeFetch({ '/config': () => json({}) });
+    const el = mount({ 'lang-storage-key': 'lang' });
+
+    expect(container(el).getAttribute('dir')).toBe('rtl');
+  });
+
+  it('prefers an explicit lang attribute over the stored language', () => {
+    localStorage.setItem('lang', 'ar');
+    routeFetch({ '/config': () => json({}) });
+    const el = mount({ 'lang-storage-key': 'lang', lang: 'en' });
+
+    expect(container(el).getAttribute('dir')).toBe('ltr');
+  });
+});
+
 describe('<gaith-chat>', () => {
   it('starts with the built-in greeting alongside the panel controls', () => {
     routeFetch({});

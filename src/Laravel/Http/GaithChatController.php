@@ -89,6 +89,40 @@ final class GaithChatController extends Controller
     }
 
     /**
+     * The built chat box, straight from this package, so `composer update` ships a new
+     * one with nothing to publish. Browsers reuse it for 5 minutes and then revalidate
+     * by ETag, so an update reaches users within minutes without a version in the URL.
+     * The source map is not served: it would hand out the widget's source.
+     */
+    public function script(Request $request): Response
+    {
+        $path = self::scriptPath();
+        $stat = @stat($path);
+        if ($stat === false) {
+            return new Response('', 404);
+        }
+
+        $etag = '"' . sha1($stat['mtime'] . ':' . $stat['size']) . '"';
+        $headers = [
+            'Content-Type' => 'application/javascript; charset=utf-8',
+            'Cache-Control' => 'public, max-age=300',
+            'ETag' => $etag,
+            'X-Content-Type-Options' => 'nosniff',
+        ];
+
+        if (in_array($etag, $request->getETags(), true)) {
+            return new Response('', 304, $headers);
+        }
+
+        return new Response((string) file_get_contents($path), 200, $headers);
+    }
+
+    private static function scriptPath(): string
+    {
+        return dirname(__DIR__, 3) . '/dist/gaith-chat.js';
+    }
+
+    /**
      * Per-product widget settings from the host's .env, so each app can brand the
      * widget without a frontend change. Invalid colours are dropped (the widget
      * then keeps its default) rather than passed into the browser's CSS.

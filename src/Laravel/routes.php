@@ -4,6 +4,15 @@ use Illuminate\Support\Facades\Route;
 use Osos\Gaith\Sdk\Laravel\Http\GaithChatController;
 
 /*
+ * The chat box script itself. Outside the sign-in group on purpose: a <script> tag cannot
+ * send the host's Authorization header, and the file holds nothing private.
+ */
+Route::get(
+    trim(config('gaith-chatbot.widget.prefix', 'api/gaith'), '/') . '/gaith-chat.js',
+    [GaithChatController::class, 'script']
+)->name('gaith-chat.script');
+
+/*
  * Routes for the <gaith-chat> widget. Loaded only when gaith-chatbot.widget.enabled
  * is true; prefix and middleware come from config so each host app puts them
  * behind its own authentication.
