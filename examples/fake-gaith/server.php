@@ -29,6 +29,9 @@ $apiKey = $env('FAKE_GAITH_API_KEY', 'fake-gaith-key');
 $issuer = $env('FAKE_GAITH_ISSUER', 'qhse');
 $enabled = array_values(array_filter(array_map('trim', explode(',', $env('FAKE_GAITH_ENABLED_CUSTOMERS')))));
 $publicKeyPath = $env('FAKE_GAITH_PUBLIC_KEY_PATH');
+// When set, every chat answer asks the user to connect their account first, using this link.
+$connectUrl = $env('FAKE_GAITH_CONNECT_URL');
+$connectServer = $env('FAKE_GAITH_CONNECT_SERVER', 'QHSE');
 
 $path = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
@@ -113,6 +116,15 @@ if ($method === 'POST' && $route === 'chat') {
 
     $conversation = $body['conversation_id'] ?? bin2hex(random_bytes(16));
     $send('meta', ['conversation_id' => $conversation, 'user_message_id' => bin2hex(random_bytes(8)), 'stream_id' => bin2hex(random_bytes(8))], 0);
+
+    // Pretend a tool needs the user's own account first, as real GAITH will (plan step 4.3).
+    if ($connectUrl !== '') {
+        $send('token', ['content' => "To answer this I need access to your {$connectServer} account. Connect it, then try again."], 1);
+        $send('connect_needed', ['server' => $connectServer, 'url' => $connectUrl]);
+        $send('done', ['message_id' => bin2hex(random_bytes(8)), 'conversation_id' => $conversation, 'finish_reason' => 'stop', 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]], 2);
+        return true;
+    }
+
     $reply = "Fake GAITH here. Your proof checked out: you are **{$claims['sub']}** at customer **{$claims['tenant']}** "
         . "of **{$claims['iss']}**. You said:\n\n> " . str_replace("\n", "\n> ", (string) ($body['message'] ?? ''));
     $seq = 1;

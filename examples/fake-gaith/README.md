@@ -31,6 +31,8 @@ are, so a wrong identity shows at once. Every request is logged with its `X-Trac
    | `FAKE_GAITH_API_KEY` | `fake-gaith-key` | expected `X-API-Key` |
    | `FAKE_GAITH_ISSUER` | `qhse` | expected product (`iss`) |
    | `FAKE_GAITH_ENABLED_CUSTOMERS` | (empty: all on) | comma-separated customers that are switched on |
+   | `FAKE_GAITH_CONNECT_URL` | (empty: off) | when set, every answer asks the user to connect their account first, with this link (the chat box shows a Connect button) |
+   | `FAKE_GAITH_CONNECT_SERVER` | `QHSE` | the service name on that button |
 
 3. Check it from the command line, signing as the host would:
 
@@ -50,6 +52,8 @@ GAITH_CHATBOT_ID=11111111-1111-1111-1111-111111111111
 GAITH_CHATBOT_API_KEY=fake-gaith-key
 GAITH_PROOF_KEY_ID=local-1
 GAITH_PROOF_PRIVATE_KEY_PATH=/path/to/proof.pem
+# Only needed to see the Connect button: the address of FAKE_GAITH_CONNECT_URL
+GAITH_CHAT_WIDGET_CONNECT_ORIGINS=http://localhost:9000
 ```
 
 Then sign in to the host and open the chat box: the reply names the signed-in user's

@@ -4,6 +4,7 @@ namespace Osos\Gaith\Sdk\Tests\Streaming;
 
 use Osos\Gaith\Sdk\Models\FileRef;
 use Osos\Gaith\Sdk\Streaming\ChatEvent;
+use Osos\Gaith\Sdk\Streaming\ConnectNeededEvent;
 use Osos\Gaith\Sdk\Streaming\DoneEvent;
 use Osos\Gaith\Sdk\Streaming\FileEvent;
 use Osos\Gaith\Sdk\Streaming\MetaEvent;
@@ -65,6 +66,21 @@ final class ChatEventMappingTest extends TestCase
         $this->assertInstanceOf(DoneEvent::class, $event);
         $this->assertTrue($event->isTerminal());
         $this->assertSame(1, $event->usage()->inputTokens());
+    }
+
+    public function testConnectNeededCarriesTheServiceAndItsLink(): void
+    {
+        $event = ChatEvent::fromFrame(new SseFrame(null, 'connect_needed', json_encode([
+            'server' => 'QHSE',
+            'url' => 'https://qhse-mcp.example.com/authorize?state=abc',
+        ])));
+
+        $this->assertInstanceOf(ConnectNeededEvent::class, $event);
+        $this->assertSame('QHSE', $event->server());
+        $this->assertSame('https://qhse-mcp.example.com/authorize?state=abc', $event->url());
+
+        // Without a link there is nothing to show, so it is skipped like an unknown event.
+        $this->assertNull(ChatEvent::fromFrame(new SseFrame(null, 'connect_needed', json_encode(['server' => 'QHSE']))));
     }
 
     public function testQuestionEventCarriesClickableOptions(): void

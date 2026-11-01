@@ -21,8 +21,108 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('<gaith-chat> connecting an account', () => {
+  const CONNECT_REPLY = [
+    'event: meta\ndata: {"conversation_id":"c1"}\n\n',
+    'event: token\ndata: {"content":"I need access to QHSE first."}\n\n',
+    'event: connect\ndata: {"server":"QHSE","url":"https://qhse-mcp.example.com/authorize?state=abc"}\n\n',
+    'event: done\ndata: {"message_id":"m1","conversation_id":"c1","finish_reason":"stop"}\n\n',
+  ];
+
+  it('offers a Connect button that opens the link, and Try again resends the question', async () => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
+    const fetchMock = routeFetch({ '/stream': () => sseResponse(CONNECT_REPLY) });
+    const el = mount() as any;
+    el.send('show my incidents');
+    await flush(50);
+
+    const buttons = Array.from(shadow(el).querySelectorAll('.connect button')) as HTMLButtonElement[];
+    expect(buttons.map((b) => b.textContent)).toEqual(['Connect to QHSE', 'Try again']);
+
+    buttons[0].click();
+    expect(opened).toHaveBeenCalledWith('https://qhse-mcp.example.com/authorize?state=abc', '_blank', 'noopener,noreferrer');
+
+    buttons[1].click();
+    await flush(50);
+    const sent = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/stream'));
+    expect(sent).toHaveLength(2);
+    expect(JSON.parse(String((sent[1][1] as RequestInit).body)).message).toBe('show my incidents');
+  });
+});
+
+describe('<gaith-chat> switched on or off per customer', () => {
+  const isShown = (el: HTMLElement) => !container(el).classList.contains('off');
+
+  it('shows itself when the chatbot is on for this customer', async () => {
+    routeFetch({ '/status': () => json({ enabled: true }) });
+    const el = mount();
+    await flush(30);
+
+    expect(isShown(el)).toBe(true);
+  });
+
+  it.each([
+    ['the chatbot is off for this customer', () => json({ enabled: false })],
+    ['the check fails', () => json({ code: 'gaith_error' }, 502)],
+    ['the answer is not a clear yes', () => json({ enabled: 'yes' })],
+  ])('stays hidden when %s, even after the slow-backend timer', async (_case, answer) => {
+    routeFetch({ '/status': answer });
+    const el = mount();
+    await flush(1600);
+
+    expect(isShown(el)).toBe(false);
+  });
+});
+
 describe('<gaith-chat> tag settings (no host JavaScript)', () => {
   afterEach(() => localStorage.clear());
+
+  afterEach(() => document.documentElement.removeAttribute('lang'));
+
+  // QHSE switches language without reloading: it saves the new language and changes <html lang>.
+  const switchPageTo = (lang: string) => {
+    localStorage.setItem('lang', lang);
+    document.documentElement.setAttribute('lang', lang);
+  };
+
+  it('switches language as soon as the page does', async () => {
+    localStorage.setItem('lang', 'en');
+    routeFetch({ '/config': () => json({}) });
+    const el = mount({ 'lang-storage-key': 'lang' });
+    expect(container(el).getAttribute('dir')).toBe('ltr');
+
+    switchPageTo('ar');
+    await flush(10);
+
+    expect(container(el).getAttribute('dir')).toBe('rtl');
+  });
+
+  it('lets a reply that is being written finish first, then switches', async () => {
+    localStorage.setItem('lang', 'en');
+    const encoder = new TextEncoder();
+    let finish: () => void = () => {};
+    const slowReply = () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: token\ndata: {"content":"Hello"}\n\n'));
+        finish = () => {
+          controller.enqueue(encoder.encode('event: done\ndata: {"message_id":"m1","conversation_id":"c1","finish_reason":"stop"}\n\n'));
+          controller.close();
+        };
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    routeFetch({ '/config': () => json({}), '/stream': slowReply });
+    const el = mount({ 'lang-storage-key': 'lang' }) as any;
+    el.send('hi');
+    await flush(20);
+
+    switchPageTo('ar');
+    await flush(10);
+    expect(container(el).getAttribute('dir')).toBe('ltr'); // still writing the English reply
+
+    finish();
+    await flush(20);
+    expect(container(el).getAttribute('dir')).toBe('rtl');
+  });
 
   const authOf = (mock: ReturnType<typeof routeFetch>, suffix: string) => {
     const call = mock.mock.calls.filter((c) => String(c[0]).endsWith(suffix)).pop()!;

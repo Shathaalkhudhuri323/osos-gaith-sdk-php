@@ -48,6 +48,14 @@ abstract class ChatEvent
                 $question = \Osos\Gaith\Sdk\Models\Question::fromArray($data);
                 // A malformed question is skipped like an unknown event; its text still arrived as tokens.
                 return $question === null ? null : new QuestionEvent((string) ($data['id'] ?? ''), $question);
+            case 'connect_needed':
+                // Without a link there is nothing the user could click, so it is skipped.
+                $server = $data['server'] ?? null;
+                $url = $data['url'] ?? null;
+                if (!is_string($url) || trim($url) === '') {
+                    return null;
+                }
+                return new ConnectNeededEvent(is_string($server) ? trim($server) : '', trim($url));
             default:
                 return null;
         }

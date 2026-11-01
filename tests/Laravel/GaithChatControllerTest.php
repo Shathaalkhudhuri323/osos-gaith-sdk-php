@@ -679,6 +679,40 @@ final class GaithChatControllerTest extends TestCase
         $this->assertNull($this->sentFilePath);
     }
 
+    /**
+     * @dataProvider connectLinks
+     */
+    public function testAConnectLinkReachesTheBrowserOnlyFromAnAllowedAddress(string $url, bool $relayed): void
+    {
+        $this->app['config']->set('gaith-chatbot.widget.connect_origins', ['https://qhse-mcp.example.com']);
+        $this->signIn();
+        $this->bindStreaming([
+            "event: meta\ndata: {\"conversation_id\":\"c1\",\"user_message_id\":\"um1\",\"stream_id\":\"s1\"}\n\n",
+            'event: connect_needed' . "\n" . 'data: ' . json_encode(['server' => 'QHSE', 'url' => $url]) . "\n\n",
+            "event: done\ndata: {\"message_id\":\"m1\",\"conversation_id\":\"c1\",\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\n",
+        ]);
+
+        $body = $this->post('/api/gaith/stream', ['message' => 'show my incidents'])->streamedContent();
+
+        $expected = "event: connect\ndata: " . json_encode(['server' => 'QHSE', 'url' => $url], JSON_UNESCAPED_SLASHES) . "\n\n";
+        if ($relayed) {
+            $this->assertStringContainsString($expected, $body);
+        } else {
+            $this->assertStringNotContainsString('event: connect', $body);
+        }
+        $this->assertStringContainsString('event: done', $body); // the reply still finishes
+    }
+
+    public static function connectLinks(): array
+    {
+        return [
+            'the QHSE MCP' => ['https://qhse-mcp.example.com/authorize?state=abc', true],
+            'a look-alike address' => ['https://qhse-mcp.example.com.evil.test/authorize', false],
+            'plain http' => ['http://qhse-mcp.example.com/authorize', false],
+            'not a web link' => ['javascript:alert(1)', false],
+        ];
+    }
+
     public function testItRelaysAClarifyingQuestionWithItsOptions(): void
     {
         $this->signIn();

@@ -1,5 +1,5 @@
 import {
-  AttachmentRules, ChatFile, fetchConfig, fetchFile, fetchHistory, HeaderProvider, NO_ATTACHMENTS, streamTurn,
+  AttachmentRules, ChatFile, fetchConfig, fetchFile, fetchStatus, fetchHistory, HeaderProvider, NO_ATTACHMENTS, streamTurn,
   toChatFile, toOptions, Turn, uploadFile,
 } from './client';
 import { Lang, normalizeLang, pick, strings } from './i18n';
@@ -27,6 +27,8 @@ interface Message {
   files: ChatFile[];
   /** A bot reply that asked a clarifying question: its clickable answers. */
   options?: string[];
+  /** A bot reply that needs the user to connect an account first: the service and its link. */
+  connect?: { server: string; url: string };
 }
 
 type Status = 'idle' | 'streaming' | 'error';
@@ -175,6 +177,13 @@ export class GaithChatElement extends HTMLElement {
   private dictation: Dictation | null = null;
   private dictationBase = '';
   private voiceError: string | null = null;
+  /** Whether the chatbot is switched on for this user's customer. Hidden until we know it is. */
+  private chatbotOn = false;
+  /** The language currently shown, and whether a switch is waiting for a reply to finish. */
+  private shownLanguage: Lang = 'en';
+  private languageSwitchWaiting = false;
+  /** Watches the page's <html lang>, so the chat box can follow a language switch. */
+  private pageLanguageWatcher: MutationObserver | null = null;
   /** Initial config + history load; 'failed' means auth was missing and it retries once getHeaders is set. */
   private loadState: 'idle' | 'scheduled' | 'loading' | 'done' | 'failed' = 'idle';
   private els!: {
@@ -218,10 +227,38 @@ export class GaithChatElement extends HTMLElement {
     return this.getAttribute('endpoint') || 'api/gaith';
   }
 
+  /** The language the chat box is showing right now. */
   private get language(): Lang {
+    return this.shownLanguage;
+  }
+
+  /**
+   * The language the page wants right now: the tag's `lang` if set, otherwise what the page
+   * saved under `lang-storage-key`, otherwise the page's own <html lang>.
+   */
+  private get pageLanguage(): Lang {
     return normalizeLang(
       this.getAttribute('lang') || stored(this.getAttribute('lang-storage-key')) || document.documentElement.lang
     );
+  }
+
+  /**
+   * Switches the chat box to the page's language when the page changes it (QHSE does this
+   * without reloading the page). If a reply is being written, we let it finish in its
+   * language and switch right after it ends.
+   */
+  private followPageLanguage(): void {
+    if (!this.els || this.pageLanguage === this.shownLanguage) {
+      return;
+    }
+    if (this.status === 'streaming') {
+      this.languageSwitchWaiting = true;
+      return;
+    }
+    this.languageSwitchWaiting = false;
+    this.shownLanguage = this.pageLanguage;
+    this.applyLanguage();
+    this.renderMessages();
   }
 
   /**
@@ -260,6 +297,9 @@ export class GaithChatElement extends HTMLElement {
     if (!this.els) {
       this.build();
     }
+    this.shownLanguage = this.pageLanguage;
+    this.pageLanguageWatcher = new MutationObserver(() => this.followPageLanguage());
+    this.pageLanguageWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
     this.applyLanguage();
     this.renderMessages();
 
@@ -278,10 +318,32 @@ export class GaithChatElement extends HTMLElement {
   private async load(): Promise<void> {
     this.loadState = 'loading';
     const results = await Promise.all([
+      this.loadStatus(),
       this.loadTheme(),
       this.conversationId && this.messages.length === 0 ? this.restoreHistory(this.conversationId) : Promise.resolve(true),
     ]);
     this.loadState = results.every(Boolean) ? 'done' : 'failed';
+  }
+
+  /**
+   * Asks whether the chatbot is on for this user's customer, and shows or hides the chat box.
+   * Anything but a clear "on" keeps it hidden: off, an error, or no answer.
+   *
+   * @returns false only when the request was refused for lack of sign-in (worth retrying)
+   */
+  private async loadStatus(): Promise<boolean> {
+    try {
+      this.chatbotOn = await fetchStatus(this.endpoint, this.headerProvider);
+      return true;
+    } catch (error) {
+      this.chatbotOn = false;
+      return !this.isAuthError(error);
+    } finally {
+      this.els.container.classList.toggle('off', !this.chatbotOn);
+      if (!this.chatbotOn && this.isOpen) {
+        this.close();
+      }
+    }
   }
 
   /** @returns false only when the request was refused for lack of auth (worth retrying). */
@@ -317,6 +379,8 @@ export class GaithChatElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.pageLanguageWatcher?.disconnect();
+    this.pageLanguageWatcher = null;
     this.stopVoice();
     this.abandonTurn();
     // A framework may detach and later reattach the same element. The canceled
@@ -334,8 +398,12 @@ export class GaithChatElement extends HTMLElement {
     this.fileErrors.clear();
   }
 
-  attributeChangedCallback(): void {
+  attributeChangedCallback(name: string): void {
     if (!this.els) { return; }
+    if (name === 'lang') {
+      this.followPageLanguage();
+      return;
+    }
     this.applyLanguage();
     this.renderMessages();
   }
@@ -365,6 +433,10 @@ export class GaithChatElement extends HTMLElement {
     this.storeConversation(null);
     this.els.input.value = '';
     this.renderMessages();
+    // A reply that was cut short by the reset will not finish, so make a waiting language switch now.
+    if (this.languageSwitchWaiting) {
+      this.followPageLanguage();
+    }
   }
 
   /**
@@ -464,6 +536,10 @@ export class GaithChatElement extends HTMLElement {
         reply.options = options;
         this.queueRender();
       },
+      onConnect: (server, url) => {
+        reply.connect = { server, url };
+        this.queueRender();
+      },
       onFile: (file) => {
         reply.files.push(file);
         this.queueRender();
@@ -499,6 +575,9 @@ export class GaithChatElement extends HTMLElement {
     this.status = status;
     reply.sentAt = new Date();
     this.renderMessages();
+    if (this.languageSwitchWaiting) {
+      this.followPageLanguage();
+    }
   }
 
   private abandonTurn(): void {
@@ -545,7 +624,7 @@ export class GaithChatElement extends HTMLElement {
   private build(): void {
     this.root.innerHTML = `
       <style>${STYLES}</style>
-      <div class="root pending" part="root">
+      <div class="root pending off" part="root">
         <div class="panel" part="panel" role="dialog" hidden>
           <div class="header" part="header">
             <span class="start">
@@ -817,6 +896,12 @@ export class GaithChatElement extends HTMLElement {
       children.push(this.optionButtons(last.options, 'options answers'));
     }
 
+    // A reply that needs the user to connect an account: a button for the link, and one to
+    // ask the same question again once they have connected. Only under the latest reply.
+    if (last && last.author === 'bot' && last.connect && this.status !== 'streaming') {
+      children.push(this.connectButtons(last, last.connect));
+    }
+
     // Moving existing nodes keeps loaded images; only changed rows were rebuilt.
     list.replaceChildren(...children);
 
@@ -830,6 +915,37 @@ export class GaithChatElement extends HTMLElement {
     if (nearBottom || this.status === 'streaming') {
       list.scrollTop = list.scrollHeight;
     }
+  }
+
+  /**
+   * "Connect to QHSE" opens the sign-in link in a new tab, where the user approves the
+   * connection. "Try again" then sends the question that led to this reply once more.
+   */
+  private connectButtons(reply: Message, connect: { server: string; url: string }): HTMLElement {
+    const t = strings(this.language);
+    const box = document.createElement('div');
+    box.className = 'options connect';
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'option primary';
+    open.textContent = t.connect.replace('{server}', connect.server || t.connectFallback);
+    // noopener: the new tab cannot reach back into this page.
+    open.addEventListener('click', () => window.open(connect.url, '_blank', 'noopener,noreferrer'));
+    box.appendChild(open);
+
+    const index = this.messages.indexOf(reply);
+    const question = index > 0 && this.messages[index - 1].author === 'user' ? this.messages[index - 1].text : '';
+    if (question) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'option';
+      retry.textContent = t.tryAgain;
+      retry.addEventListener('click', () => this.send(question));
+      box.appendChild(retry);
+    }
+
+    return box;
   }
 
   /** Clickable chips; a click sends the label as the user's message. */

@@ -31,6 +31,8 @@ export interface TurnHandlers {
   onNotice(kind: 'limit' | 'tool', detail: string): void;
   /** The bot asks a clarifying question; these labels are offered as buttons. */
   onQuestion(options: string[]): void;
+  /** A tool needs the user to connect their own account first; `url` is where they do it. */
+  onConnect?(server: string, url: string): void;
   onDone(conversationId: string | null): void;
   /** code is for logging; the widget shows its own localized text. */
   onError(code: string): void;
@@ -148,6 +150,14 @@ export function streamTurn(
         // The question itself also arrives as tokens; this adds its answer buttons.
         const options = toOptions(data.options);
         if (options.length >= 2) { handlers.onQuestion(options); }
+        break;
+      }
+      case 'connect': {
+        // The backend only sends links to addresses the product allows; we still accept
+        // nothing but web links here, so a javascript: or data: link can never be opened.
+        if (typeof data.url === 'string' && /^https?:\/\//i.test(data.url) && handlers.onConnect) {
+          handlers.onConnect(typeof data.server === 'string' ? data.server : '', data.url);
+        }
         break;
       }
       case 'file': {
@@ -290,6 +300,25 @@ export async function uploadFile(
     throw new Error('upload_failed');
   }
   return uploaded;
+}
+
+/**
+ * Asks the product's backend whether the chatbot is switched on for this user's customer.
+ * Only a clear `true` counts as on. A refused or failed request throws, so the caller can
+ * tell "not signed in yet" (worth trying again) apart from a real "off".
+ */
+export async function fetchStatus(endpoint: string, headerProvider: HeaderProvider | null): Promise<boolean> {
+  const path = join(endpoint, 'status');
+  const headers = await headersFor(headerProvider, { method: 'GET', path, body: null, payload: null });
+  const response = await fetch(path, {
+    headers: { Accept: 'application/json', ...headers },
+    credentials: 'same-origin',
+  });
+  if (!response.ok) {
+    throw new Error('http_' + response.status);
+  }
+  const json = await response.json();
+  return !!json && json.enabled === true;
 }
 
 export async function fetchConfig(endpoint: string, headerProvider: HeaderProvider | null): Promise<WidgetConfig> {

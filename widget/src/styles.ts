@@ -37,6 +37,8 @@ export const STYLES = `
 }
 /* Hidden until the product theme arrives, so the button never flashes the wrong colour. */
 .root.pending { visibility: hidden; }
+/* Not shown at all until the backend confirms the chatbot is on for this customer. */
+.root.off { display: none; }
 .root[dir="rtl"] { right: auto; left: var(--gaith-chat-side); align-items: flex-start; }
 
 /* ---------- Launcher ---------- */
@@ -262,6 +264,9 @@ a.protect-name:hover { color: var(--p); }
 }
 .option:hover:not(:disabled) { background: #e6e6e6; }
 .option:disabled { opacity: .5; cursor: default; }
+/* Connect buttons: side by side, the first one in the product colour. */
+.connect { flex-direction: row; flex-wrap: wrap; }
+.connect .option.primary { background: var(--p); color: var(--on-p); }
 
 /* ---------- Composer ---------- */
 .composer { flex: 0 0 auto; padding: 8px 24px 10px; background: var(--surface); }

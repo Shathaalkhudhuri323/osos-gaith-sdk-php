@@ -43,6 +43,12 @@ export interface Strings {
   dropFiles: string;
   /** Sent as the message text when the user sends files without typing anything. */
   attachmentOnly: string;
+  /** The button that opens the link to connect an account; {server} is the service name. */
+  connect: string;
+  /** Used for {server} when GAITH did not say which service. */
+  connectFallback: string;
+  /** Sends the question again, after the user has connected. */
+  tryAgain: string;
 }
 
 const STRINGS: Record<Lang, Strings> = {
@@ -84,6 +90,9 @@ const STRINGS: Record<Lang, Strings> = {
     tooManyFiles: 'Too many files',
     dropFiles: 'Drop files to attach',
     attachmentOnly: 'Please take a look at the attached file(s).',
+    connect: 'Connect to {server}',
+    connectFallback: 'your account',
+    tryAgain: 'Try again',
   },
   ar: {
     chat: 'محادثة',
@@ -123,6 +132,9 @@ const STRINGS: Record<Lang, Strings> = {
     tooManyFiles: 'عدد الملفات كبير',
     dropFiles: 'أفلت الملفات لإرفاقها',
     attachmentOnly: 'يرجى الاطلاع على الملف (الملفات) المرفقة.',
+    connect: 'الاتصال بـ {server}',
+    connectFallback: 'حسابك',
+    tryAgain: 'حاول مرة أخرى',
   },
 };
 

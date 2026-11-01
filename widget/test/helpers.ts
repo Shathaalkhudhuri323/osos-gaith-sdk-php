@@ -21,7 +21,7 @@ export const HAPPY_PATH = [
 /**
  * Fakes the host backend: each request is answered by the first route whose key
  * the URL ends with, with a fresh Response every time (a body can be read once).
- * Unrouted config calls get an empty theme.
+ * Unrouted config calls get an empty theme, and unrouted status calls say the chatbot is on.
  */
 export function routeFetch(routes: Record<string, () => Response>) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -33,6 +33,9 @@ export function routeFetch(routes: Record<string, () => Response>) {
     }
     if (url.endsWith('/config')) {
       return new Response(JSON.stringify({ theme: {} }), { status: 200 });
+    }
+    if (url.endsWith('/status')) {
+      return new Response(JSON.stringify({ enabled: true }), { status: 200 });
     }
     return new Response('', { status: 404 });
   });

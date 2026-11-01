@@ -105,6 +105,16 @@ return [
             explode(',', (string) env('GAITH_CHAT_WIDGET_IMAGE_ORIGINS', ''))
         ))),
 
+        // Addresses a "Connect" link may point to. When a chatbot tool (an MCP server, such as
+        // the QHSE MCP) needs the user to connect their own account, GAITH sends a link where
+        // they sign in and approve. It is only shown if it starts with one of these addresses,
+        // so a wrong or harmful link never reaches the user. Usually the MCP's public address.
+        // Comma-separated in .env: https://qhse-mcp.example.com
+        'connect_origins' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('GAITH_CHAT_WIDGET_CONNECT_ORIGINS', ''))
+        ))),
+
         // Files users attach to a message. Uploads go to GAITH (it stores them, scoped to the
         // user, for a limited time); the host only checks and forwards them. Keep these at or
         // below GAITH's own limits, and raise PHP's upload_max_filesize / post_max_size to match.

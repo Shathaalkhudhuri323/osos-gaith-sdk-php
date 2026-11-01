@@ -251,6 +251,19 @@ chat.options = {
 | `token-storage-key` | localStorage key of the page's sign-in token, sent as `Authorization: Bearer …` to `endpoint` on every request (read fresh each time). Used only when `getHeaders` is not set |
 | `lang-storage-key` | localStorage key of the page's language (`en`/`ar`), used when there is no `lang` attribute |
 
+**Language switches:** the chat box follows the page when its language changes without a reload
+(QHSE's language menu updates `<html lang>`). If a reply is being written at that moment, it finishes
+in its own language and the chat box switches right after.
+
+**Connecting an account:** when a chatbot tool (an MCP server, such as the QHSE MCP) needs the user
+to connect their own account, GAITH sends a link and the chat box shows **Connect to QHSE** (opens the
+link in a new tab, where the user approves) and **Try again** (asks the question once more). The link
+is only shown if it is an https link to an address in `GAITH_CHAT_WIDGET_CONNECT_ORIGINS`, usually the
+MCP's public address; anything else is dropped and logged. Plain http is allowed only for localhost.
+
+**Switched on per customer:** on load the chat box asks `{prefix}/status`. It only appears when the
+answer is a clear yes; if the chatbot is off for the user's customer, or the check fails, it stays hidden.
+
 **No host JavaScript (QHSE):** the page keeps its token and language in localStorage, so the tag alone is
 enough. Put it in `index.html`; no `getHeaders`, no Angular change:
 

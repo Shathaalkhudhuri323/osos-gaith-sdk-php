@@ -26,6 +26,7 @@ use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 use Osos\Gaith\Sdk\Models\FileRef;
 use Osos\Gaith\Sdk\Models\MessagePageOptions;
 use Osos\Gaith\Sdk\Streaming\ChatEvent;
+use Osos\Gaith\Sdk\Streaming\ConnectNeededEvent;
 use Osos\Gaith\Sdk\Streaming\DoneEvent;
 use Osos\Gaith\Sdk\Streaming\ErrorEvent;
 use Osos\Gaith\Sdk\Streaming\FileEvent;
@@ -120,6 +121,44 @@ final class GaithChatController extends Controller
         return new Response((string) file_get_contents($path), 200, $headers);
     }
 
+    /**
+     * Reads a list of web addresses from the widget settings (e.g. `image_origins`) and keeps
+     * only the address part, "https://host" or "https://host:port", in lower case. Anything
+     * that is not such an address, for example one with a path, is dropped.
+     *
+     * @return string[]
+     */
+    private static function origins(string $setting): array
+    {
+        $origins = [];
+        foreach ((array) config('gaith-chatbot.widget.' . $setting, []) as $origin) {
+            if (is_string($origin) && preg_match('#^(https?://[a-z0-9.-]+(:\d{1,5})?)/?$#i', trim($origin), $m)) {
+                $origins[] = strtolower($m[1]);
+            }
+        }
+
+        return array_values(array_unique($origins));
+    }
+
+    /**
+     * Whether a "Connect" link may be shown to the user: it must be an https link to one of
+     * the addresses in `widget.connect_origins`. Plain http is accepted only for localhost,
+     * so the fake GAITH can be used while developing.
+     */
+    private static function isAllowedConnectLink(string $url): bool
+    {
+        if (!preg_match('#^(https?)://([a-z0-9.-]+)(:\d{1,5})?(/|\?|$)#i', $url, $m)) {
+            return false;
+        }
+        $scheme = strtolower($m[1]);
+        $host = strtolower($m[2]);
+        if ($scheme === 'http' && !in_array($host, ['localhost', '127.0.0.1'], true)) {
+            return false;
+        }
+
+        return in_array($scheme . '://' . $host . ($m[3] ?? ''), self::origins('connect_origins'), true);
+    }
+
     private static function scriptPath(): string
     {
         return dirname(__DIR__, 3) . '/dist/gaith-chat.js';
@@ -140,19 +179,11 @@ final class GaithChatController extends Controller
             }
         }
 
-        $origins = [];
-        foreach ((array) config('gaith-chatbot.widget.image_origins', []) as $origin) {
-            // Origins only (scheme://host[:port]); a path or anything else is dropped.
-            if (is_string($origin) && preg_match('#^(https?://[a-z0-9.-]+(:\d{1,5})?)/?$#i', trim($origin), $m)) {
-                $origins[] = strtolower($m[1]);
-            }
-        }
-
         return new JsonResponse([
             'theme' => (object) $theme,
             'privacy_url' => self::privacyUrl(),
             'voice' => (bool) config('gaith-chatbot.widget.voice', true),
-            'image_origins' => array_values(array_unique($origins)),
+            'image_origins' => self::origins('image_origins'),
             'attachments' => [
                 'enabled' => self::attachmentsEnabled(),
                 'max_files' => self::maxAttachments(),
@@ -545,6 +576,13 @@ final class GaithChatController extends Controller
                     // silent through a long tool call - a proxy in front of us would
                     // cull it well before GAITH is actually finished.
                     $this->emitComment();
+                } elseif ($event instanceof ConnectNeededEvent && !self::isAllowedConnectLink($event->url())) {
+                    // The user would be sent to this link to sign in, so it must point to a
+                    // service the product trusts. Anything else is not shown, and logged.
+                    Log::warning('GAITH chat: a connect link was not shown because its address is not in widget.connect_origins', [
+                        'trace_id' => $this->traceId,
+                        'server' => $event->server(),
+                    ]);
                 } else {
                     $this->emit($this->eventName($event), $this->eventPayload($event));
                 }
@@ -685,6 +723,7 @@ final class GaithChatController extends Controller
         if ($event instanceof ToolResultEvent) { return 'tool_result'; }
         if ($event instanceof SafetyBlockEvent) { return 'safety_block'; }
         if ($event instanceof QuestionEvent) { return 'question'; }
+        if ($event instanceof ConnectNeededEvent) { return 'connect'; }
 
         return 'unknown';
     }
@@ -727,6 +766,9 @@ final class GaithChatController extends Controller
         }
         if ($event instanceof QuestionEvent) {
             return ['question' => $event->question()->question(), 'options' => $event->question()->options()];
+        }
+        if ($event instanceof ConnectNeededEvent) {
+            return ['server' => $event->server(), 'url' => $event->url()];
         }
 
         return [];
