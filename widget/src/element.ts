@@ -3,7 +3,7 @@ import {
   toChatFile, toOptions, Turn, uploadFile,
 } from './client';
 import { Lang, normalizeLang, pick, strings } from './i18n';
-import { ImageGate, imageGate, renderMarkdown } from './render';
+import { ImageGate, imageGate, LinkGate, originGate, renderMarkdown } from './render';
 import BOT_LOGO from './assets/gaith-bot.gif';
 import { STYLES } from './styles';
 import { Dictation, startDictation, voiceSupported } from './voice';
@@ -158,6 +158,8 @@ export class GaithChatElement extends HTMLElement {
   private renderQueued = false;
   /** Which markdown image URLs may load; until the config arrives, only the host's own origin. */
   private gate: ImageGate = imageGate([]);
+  /** Which links in replies stay clickable; until the config arrives, only the page's own site. */
+  private linkGate: LinkGate = originGate([]);
   /** Rendered rows by message, reused while a message is unchanged so images never reload. */
   private rows = new Map<Message, { el: HTMLElement; sig: string }>();
   private welcomeMessage: Message | null = null;
@@ -349,12 +351,13 @@ export class GaithChatElement extends HTMLElement {
   /** @returns false only when the request was refused for lack of auth (worth retrying). */
   private async loadTheme(): Promise<boolean> {
     try {
-      const { theme, privacy_url, voice, image_origins, attachments } = await fetchConfig(this.endpoint, this.headerProvider);
+      const { theme, privacy_url, voice, image_origins, link_origins, attachments } = await fetchConfig(this.endpoint, this.headerProvider);
       this.applyTheme('--gaith-chat-theme-primary', theme.primary_color);
       this.applyTheme('--gaith-chat-theme-on-primary', theme.text_color);
       this.privacyUrl = privacy_url;
       this.renderProtection();
       this.gate = imageGate(image_origins);
+      this.linkGate = originGate(link_origins);
       this.attachRules = attachments;
       this.voiceAllowed = voice;
       this.rows.clear(); // re-render bot replies under the new image rules
@@ -991,7 +994,7 @@ export class GaithChatElement extends HTMLElement {
       if (message.author === 'user') {
         bubble.textContent = message.text; // user text is never interpreted as HTML
       } else {
-        bubble.innerHTML = renderMarkdown(message.text, this.gate);
+        bubble.innerHTML = renderMarkdown(message.text, this.gate, this.linkGate);
         this.keepLoadedImages(bubble, previous);
       }
       row.appendChild(bubble);

@@ -237,6 +237,8 @@ export interface WidgetConfig {
   voice: boolean;
   /** Extra origins markdown images may load from (the host's own is always allowed). */
   image_origins: string[];
+  /** Extra sites whose links stay clickable in replies (the page's own site always is). */
+  link_origins: string[];
   attachments: AttachmentRules;
 }
 
@@ -339,6 +341,9 @@ export async function fetchConfig(endpoint: string, headerProvider: HeaderProvid
       ? json.privacy_url
       : null,
     voice: !!json && json.voice !== false,
+    link_origins: Array.isArray(json && json.link_origins)
+      ? json.link_origins.filter((o: unknown) => typeof o === 'string')
+      : [],
     image_origins: Array.isArray(json && json.image_origins)
       ? json.image_origins.filter((o: unknown) => typeof o === 'string')
       : [],

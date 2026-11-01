@@ -105,6 +105,16 @@ return [
             explode(',', (string) env('GAITH_CHAT_WIDGET_IMAGE_ORIGINS', ''))
         ))),
 
+        // Sites whose links stay clickable in the chatbot's replies, besides the product's own
+        // pages (those always are, whatever address this deployment has). A link to any other
+        // site is shown as plain text with its real address next to it, so a look-alike link
+        // cannot trick the user. Set per deployment, e.g. that deployment's QHSE MCP address.
+        // Comma-separated in .env: https://qhse-mcp.example.com
+        'link_origins' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('GAITH_CHAT_WIDGET_LINK_ORIGINS', ''))
+        ))),
+
         // Addresses a "Connect" link may point to. When a chatbot tool (an MCP server, such as
         // the QHSE MCP) needs the user to connect their own account, GAITH sends a link where
         // they sign in and approve. It is only shown if it starts with one of these addresses,

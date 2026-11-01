@@ -587,18 +587,21 @@ final class GaithChatControllerTest extends TestCase
         $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', '/policies/data-protection');
     }
 
-    public function testConfigServesOnlyValidImageOrigins(): void
+    public function testConfigServesOnlyValidImageAndLinkOrigins(): void
     {
         $this->signIn();
-        $this->app['config']->set('gaith-chatbot.widget.image_origins', [
+        $origins = [
             'https://QHSE-mcp.example.com/',
             'http://localhost:8080',
             'javascript:alert(1)',
             'https://example.com/path/not-an-origin',
-        ]);
+        ];
+        $this->app['config']->set('gaith-chatbot.widget.image_origins', $origins);
+        $this->app['config']->set('gaith-chatbot.widget.link_origins', $origins);
 
         $this->getJson('/api/gaith/config')
-            ->assertJsonPath('image_origins', ['https://qhse-mcp.example.com', 'http://localhost:8080']);
+            ->assertJsonPath('image_origins', ['https://qhse-mcp.example.com', 'http://localhost:8080'])
+            ->assertJsonPath('link_origins', ['https://qhse-mcp.example.com', 'http://localhost:8080']);
     }
 
     public function testFileEventsCarryNoGaithUrl(): void

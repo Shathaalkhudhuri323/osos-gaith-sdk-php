@@ -264,6 +264,8 @@ a.protect-name:hover { color: var(--p); }
 }
 .option:hover:not(:disabled) { background: #e6e6e6; }
 .option:disabled { opacity: .5; cursor: default; }
+/* A link that is not clickable: shown as text, with long addresses allowed to wrap. */
+.blocked-link { overflow-wrap: anywhere; }
 /* Connect buttons: side by side, the first one in the product colour. */
 .connect { flex-direction: row; flex-wrap: wrap; }
 .connect .option.primary { background: var(--p); color: var(--on-p); }

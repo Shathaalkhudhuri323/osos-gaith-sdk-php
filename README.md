@@ -261,6 +261,11 @@ link in a new tab, where the user approves) and **Try again** (asks the question
 is only shown if it is an https link to an address in `GAITH_CHAT_WIDGET_CONNECT_ORIGINS`, usually the
 MCP's public address; anything else is dropped and logged. Plain http is allowed only for localhost.
 
+**Links in replies:** links to the product's own pages are always clickable, whatever address the
+deployment has (the chat box takes it from the browser). Links to other sites are clickable only if
+the site is listed in `GAITH_CHAT_WIDGET_LINK_ORIGINS`; otherwise the link is shown as plain text with
+its real address next to it, so a look-alike link cannot fool the user. Set it per deployment.
+
 **Switched on per customer:** on load the chat box asks `{prefix}/status`. It only appears when the
 answer is a clear yes; if the chatbot is off for the user's customer, or the check fails, it stays hidden.
 

