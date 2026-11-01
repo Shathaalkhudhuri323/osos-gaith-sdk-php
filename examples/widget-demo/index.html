@@ -30,9 +30,8 @@
     // Clickable options come from the chatbot itself when it asks a clarifying question
     // (GAITH chatbot setting "follow-up questions"). A host can still add fixed starter
     // buttons with quickOptions: { en: [...], ar: [...] } - this demo does not.
-    chat.options = {
-      welcomeMessage: { en: 'Hello! I am GAITH. How can I help you today?', ar: 'مرحبا! أنا غيث. كيف يمكنني مساعدتك اليوم؟' }
-    };
+    // No welcomeMessage either: the built-in "How can I help you today?" is the pane's title.
+    chat.options = {};
 
     chat.addEventListener('gaith-chat:error', function (e) { console.warn('gaith-chat error', e.detail.code); });
   </script>

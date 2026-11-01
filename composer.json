@@ -18,7 +18,8 @@
         "vlucas/phpdotenv": "^5.0"
     },
     "suggest": {
-        "illuminate/support": "Required to use the Laravel service provider and chat widget routes (Osos\\Gaith\\Sdk\\Laravel\\GaithChatbotServiceProvider)."
+        "illuminate/support": "Required to use the Laravel service provider and chat widget routes (Osos\\Gaith\\Sdk\\Laravel\\GaithChatbotServiceProvider).",
+        "ext-fileinfo": "Required to check chat attachment uploads by their contents (Osos\\Gaith\\Sdk\\Attachments\\AttachmentTypes)."
     },
     "autoload": {
         "psr-4": {

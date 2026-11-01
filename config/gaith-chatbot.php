@@ -46,6 +46,15 @@ return [
             'text_color' => env('GAITH_CHAT_WIDGET_TEXT_COLOR', '#ffffff'),
         ],
 
+        // The product's data protection policy, linked from the lock's hover note in the widget's header.
+        // An https:// URL or a path on the host app (/privacy). Unset: the note shows without a link.
+        'privacy_url' => env('GAITH_CHAT_WIDGET_PRIVACY_URL'),
+
+        // Mic button for dictation. Speech is recognised by the user's browser and its vendor's
+        // speech service (Google for Chrome, Microsoft for Edge, Apple for Safari), not by this
+        // app or GAITH. Turn it off where that is not allowed by the product's data policy.
+        'voice' => (bool) env('GAITH_CHAT_WIDGET_VOICE', true),
+
         // Origins the widget may load markdown images from besides the host app itself,
         // e.g. an MCP server that hands out image links (QHSE: its public MCP URL).
         // Images from anywhere else render as plain links: a prompt-injected reply
@@ -63,12 +72,13 @@ return [
             'enabled' => env('GAITH_CHAT_WIDGET_ATTACHMENTS', true),
             'max_files' => 8,
             'max_bytes' => 20 * 1024 * 1024,
-            'allowed_types' => [
-                'application/pdf',
-                'image/png',
-                'image/jpeg',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            ],
+            // Extensions (or media types). The SDK supports pdf, doc, docx, xls, xlsx, csv, md,
+            // txt, png, jpg, jpeg, webp, bmp, tif, tiff; enable only what GAITH accepts for chat
+            // uploads (today: pdf, docx, png, jpg/jpeg), or users get files GAITH then refuses.
+            'allowed_types' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('GAITH_CHAT_WIDGET_ATTACHMENT_TYPES', 'pdf,docx,png,jpg,jpeg'))
+            ))),
         ],
 
         'max_message_length' => 8000,

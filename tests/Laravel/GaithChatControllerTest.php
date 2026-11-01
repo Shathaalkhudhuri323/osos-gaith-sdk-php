@@ -253,6 +253,43 @@ final class GaithChatControllerTest extends TestCase
             ->assertJsonPath('theme', ['primary_color' => '#1f6feb', 'text_color' => '#ffffff']);
     }
 
+    public function testConfigServesThePrivacyPolicyLink(): void
+    {
+        $this->signIn();
+        $this->app['config']->set('gaith-chatbot.widget.privacy_url', 'https://osos.om/privacy');
+
+        $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', 'https://osos.om/privacy');
+    }
+
+    public function testConfigDropsPrivacyLinksThatAreNotWebPages(): void
+    {
+        // The link becomes an href in the browser: no javascript:, data: or protocol-relative URLs.
+        $this->signIn();
+        foreach (['javascript:alert(1)', 'data:text/html,x', '//evil.example', 'privacy page'] as $url) {
+            $this->app['config']->set('gaith-chatbot.widget.privacy_url', $url);
+            $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', null);
+        }
+
+        $this->app['config']->set('gaith-chatbot.widget.privacy_url', '/policies/data-protection');
+        $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', '/policies/data-protection');
+    }
+
+    public function testConfigHasNoPrivacyLinkByDefault(): void
+    {
+        $this->signIn();
+
+        $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', null);
+    }
+
+    public function testConfigAllowsVoiceInputUnlessTheProductTurnsItOff(): void
+    {
+        $this->signIn();
+        $this->getJson('/api/gaith/config')->assertJsonPath('voice', true);
+
+        $this->app['config']->set('gaith-chatbot.widget.voice', false);
+        $this->getJson('/api/gaith/config')->assertJsonPath('voice', false);
+    }
+
     public function testConfigServesOnlyValidImageOrigins(): void
     {
         $this->signIn();
@@ -580,6 +617,45 @@ final class GaithChatControllerTest extends TestCase
         $this->assertSame([], $this->sentUploads);
     }
 
+    public function testUploadAcceptsTheExtraTypesOnceTheProductEnablesThem(): void
+    {
+        // The setting takes extensions; each upload goes to GAITH with its proper media type.
+        $this->signIn();
+        $this->bindUploads();
+        $this->app['config']->set('gaith-chatbot.widget.attachments.allowed_types', ['pdf', 'xlsx', 'csv', '.md']);
+
+        $files = [
+            ['budget.xlsx', 'application/zip', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+            ['leave.csv', 'text/plain', 'text/csv'],
+            ['notes.md', 'text/plain', 'text/markdown'],
+        ];
+        foreach ($files as [$name, $contents, $expected]) {
+            $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create($name, 1, $contents)])
+                ->assertStatus(201);
+            $this->assertSame($expected, end($this->sentUploads)[2], $name);
+        }
+        $this->getJson('/api/gaith/config')->assertJsonPath('attachments.allowed_types', [
+            'application/pdf',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/csv',
+            'text/markdown',
+        ]);
+    }
+
+    public function testUploadRejectsAProgramRenamedToAnAllowedExtension(): void
+    {
+        $this->signIn();
+        $this->bindUploads();
+        $this->app['config']->set('gaith-chatbot.widget.attachments.allowed_types', ['csv', 'xlsx']);
+
+        foreach (['payroll.csv', 'payroll.xlsx'] as $name) {
+            $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create($name, 1, 'application/x-dosexec')])
+                ->assertStatus(422)
+                ->assertExactJson(['code' => 'file_type_not_allowed']);
+        }
+        $this->assertSame([], $this->sentUploads);
+    }
+
     public function testUploadRejectsAFileOverTheSizeLimit(): void
     {
         $this->signIn();
@@ -627,9 +703,9 @@ final class GaithChatControllerTest extends TestCase
             'max_bytes' => 20971520,
             'allowed_types' => [
                 'application/pdf',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                 'image/png',
                 'image/jpeg',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             ],
         ]);
     }

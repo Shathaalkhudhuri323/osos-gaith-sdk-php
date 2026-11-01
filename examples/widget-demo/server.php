@@ -82,7 +82,10 @@ if ($env('GAITH_CHATBOT_BASE_URL') !== '' && $env('GAITH_CHATBOT_ID') !== '' && 
 $user = GaithUser::for('demo-user');
 
 $maxUpload = 20 * 1024 * 1024;
-$allowedUploads = ['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+// Same setting as the Laravel bridge: extensions or media types, default = what GAITH accepts today.
+$allowedUploads = \Osos\Gaith\Sdk\Attachments\AttachmentTypes::normalize(
+    explode(',', $env('GAITH_CHAT_WIDGET_ATTACHMENT_TYPES') ?: 'pdf,docx,png,jpg,jpeg')
+);
 
 $filePayload = static function (\Osos\Gaith\Sdk\Models\FileRef $file): array {
     return ['artifact_id' => $file->artifactId(), 'filename' => $file->filename(), 'media_type' => $file->mediaType(), 'size_bytes' => $file->sizeBytes()];
@@ -103,6 +106,8 @@ if ($method === 'GET' && $path === '/api/gaith/config') {
             'primary_color' => $env('GAITH_CHAT_WIDGET_PRIMARY_COLOR') ?: '#1f6feb',
             'text_color' => $env('GAITH_CHAT_WIDGET_TEXT_COLOR') ?: '#ffffff',
         ]),
+        'privacy_url' => $env('GAITH_CHAT_WIDGET_PRIVACY_URL') ?: null,
+        'voice' => !in_array(strtolower((string) $env('GAITH_CHAT_WIDGET_VOICE')), ['false', '0', 'off'], true),
         'image_origins' => array_values(array_filter(array_map('trim', explode(',', $env('GAITH_CHAT_WIDGET_IMAGE_ORIGINS'))))),
         'attachments' => ['enabled' => true, 'max_files' => 8, 'max_bytes' => $maxUpload, 'allowed_types' => $allowedUploads],
     ]);
@@ -125,12 +130,8 @@ if ($method === 'POST' && $path === '/api/gaith/attachments') {
         echo json_encode(['code' => 'file_too_large']);
         return true;
     }
-    $type = strtolower((string) (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']));
-    $docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    if ($type === 'application/zip' && strtolower(pathinfo($file['name'], PATHINFO_EXTENSION)) === 'docx') {
-        $type = $docx;
-    }
-    if (!in_array($type, $allowedUploads, true)) {
+    $type = \Osos\Gaith\Sdk\Attachments\AttachmentTypes::detect($file['tmp_name'], $file['name'], $allowedUploads);
+    if ($type === null) {
         http_response_code(422);
         echo json_encode(['code' => 'file_type_not_allowed']);
         return true;

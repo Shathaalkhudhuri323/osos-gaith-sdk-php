@@ -9,6 +9,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Osos\Gaith\Sdk\Attachments\AttachmentTypes;
 use Osos\Gaith\Sdk\Config\GaithUser;
 use Osos\Gaith\Sdk\Exceptions\GaithApiException;
 use Osos\Gaith\Sdk\Exceptions\GaithForbiddenException;
@@ -91,6 +92,8 @@ final class GaithChatController extends Controller
 
         return new JsonResponse([
             'theme' => (object) $theme,
+            'privacy_url' => self::privacyUrl(),
+            'voice' => (bool) config('gaith-chatbot.widget.voice', true),
             'image_origins' => array_values(array_unique($origins)),
             'attachments' => [
                 'enabled' => self::attachmentsEnabled(),
@@ -157,34 +160,30 @@ final class GaithChatController extends Controller
         ], 201);
     }
 
-    /**
-     * The file's type from its contents (not the browser's claim), or null when it is
-     * not an allowed type. Older libmagic reports DOCX as a ZIP; only then the
-     * browser's DOCX type is taken, and GAITH checks the bytes again on receipt.
-     */
+    /** The file's type from its contents and name (never the browser's claim), or null when not allowed. */
     private static function attachmentType(UploadedFile $file): ?string
     {
-        $allowed = self::allowedAttachmentTypes();
-        $detected = strtolower((string) $file->getMimeType());
-        if (in_array($detected, $allowed, true)) {
-            return $detected;
-        }
-
-        $docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        if (in_array($detected, ['application/zip', 'application/octet-stream'], true)
-            && in_array($docx, $allowed, true)
-            && strtolower($file->getClientOriginalExtension()) === 'docx'
-            && strtolower((string) $file->getClientMimeType()) === $docx
-        ) {
-            return $docx;
-        }
-
-        return null;
+        return AttachmentTypes::forDetectedType(
+            (string) $file->getMimeType(),
+            $file->getClientOriginalName(),
+            self::allowedAttachmentTypes()
+        );
     }
 
     private static function uploadKey(GaithUser $user, string $artifactId): string
     {
         return 'gaith-chat:upload:' . sha1($user->id() . '|' . $artifactId);
+    }
+
+    /** The product's data protection policy: an http(s) URL or a path on the host app, else null. */
+    private static function privacyUrl(): ?string
+    {
+        $url = config('gaith-chatbot.widget.privacy_url');
+        if (!is_string($url) || ($url = trim($url)) === '') {
+            return null;
+        }
+
+        return preg_match('#^(https?://[^\s"\'<>]+|/(?!/)[^\s"\'<>]*)$#i', $url) ? $url : null;
     }
 
     private static function attachmentsEnabled(): bool
@@ -202,13 +201,10 @@ final class GaithChatController extends Controller
         return max(1, (int) config('gaith-chatbot.widget.attachments.max_bytes', 20 * 1024 * 1024));
     }
 
-    /** @return string[] */
+    /** @return string[] media types; the config may list extensions ("xlsx") or media types */
     private static function allowedAttachmentTypes(): array
     {
-        return array_values(array_map('strtolower', array_filter(
-            (array) config('gaith-chatbot.widget.attachments.allowed_types', []),
-            'is_string'
-        )));
+        return AttachmentTypes::normalize((array) config('gaith-chatbot.widget.attachments.allowed_types', []));
     }
 
     /**

@@ -7,6 +7,7 @@ export const STYLES = `
   --gaith-chat-bottom: 24px;
   --gaith-chat-side: 24px;
   --gaith-chat-z-index: 1030;
+  --gaith-chat-width: 420px;
   /* A clean system stack that also covers Arabic; hosts can set their own. */
   --gaith-chat-font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Noto Sans Arabic", Tahoma, Arial, sans-serif;
   all: initial;
@@ -22,7 +23,7 @@ export const STYLES = `
   --ink: #1f2328;
   --muted: #6b7280;
   --line: #e6e8ec;
-  --surface: #f6f7f9;
+  --surface: #fafafa;
   position: fixed;
   right: var(--gaith-chat-side);
   bottom: var(--gaith-chat-bottom);
@@ -39,8 +40,8 @@ export const STYLES = `
 .root[dir="rtl"] { right: auto; left: var(--gaith-chat-side); align-items: flex-start; }
 
 /* ---------- Launcher ---------- */
-/* Small sparkles button in a see-through product colour (blurred behind, so it stays
-   legible over any page); fully solid on hover and while the chat is open. */
+/* Small round button. By default: the animated GAITH logo on a white circle with a soft
+   shadow, so it stands out on any page; a host's own launcher-icon sits on a clear circle. */
 .launcher {
   width: 48px; height: 48px; border: 0; border-radius: 50%; padding: 0; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
@@ -50,41 +51,52 @@ export const STYLES = `
   box-shadow: 0 4px 12px rgba(16,24,40,.16);
   transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease, background-color .2s ease;
 }
-.launcher:hover, .launcher.open { background: var(--p); }
+.launcher:hover { background: var(--p); }
+/* The pane has its own close button; the launcher steps aside while it is open. */
+.launcher.open { display: none; }
 .launcher:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 6px 16px rgba(16,24,40,.2); }
 .launcher:active { transform: scale(.96); }
 .launcher.has-image:not(.open) { background: transparent; box-shadow: 0 4px 12px rgba(16,24,40,.16); }
+.launcher.logo, .launcher.logo:hover {
+  background: #fff; -webkit-backdrop-filter: none; backdrop-filter: none;
+  box-shadow: 0 6px 16px rgba(16,24,40,.18), 0 1px 3px rgba(16,24,40,.12);
+}
+.launcher.logo:hover { box-shadow: 0 10px 24px rgba(16,24,40,.22), 0 2px 6px rgba(16,24,40,.12); }
 .launcher img { width: 34px; height: 34px; object-fit: contain; display: block; pointer-events: none; }
+.launcher.logo img { width: 30px; height: 30px; }
 .launcher svg { width: 30px; height: 30px; animation: spin-in .25s cubic-bezier(.2,.8,.2,1); }
 .launcher.open svg { width: 18px; height: 18px; }
 @keyframes spin-in { from { transform: rotate(-90deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Panel ---------- */
+/* A full-height side pane on the page's right edge (left in Arabic), like Copilot in Office. */
 .panel {
+  position: fixed; top: 0; right: 0; bottom: 0;
   display: flex; flex-direction: column;
-  width: 400px; height: 640px; max-height: calc(100vh - 140px); max-width: calc(100vw - 48px);
-  margin-bottom: 16px; overflow: hidden;
-  background: #fff; border-radius: 20px;
-  box-shadow: 0 24px 60px -12px rgba(16,24,40,.28), 0 8px 20px -8px rgba(16,24,40,.14), 0 0 0 1px rgba(16,24,40,.05);
-  transform-origin: bottom right;
-  animation: pop-in .22s cubic-bezier(.2,.8,.2,1);
+  width: var(--gaith-chat-width); max-width: 100vw; overflow: hidden;
+  background: var(--surface); border-left: 1px solid #e0e0e0;
+  box-shadow: -4px 0 16px rgba(0,0,0,.06);
+  animation: slide-in .22s cubic-bezier(.2,.8,.2,1);
 }
-.root[dir="rtl"] .panel { transform-origin: bottom left; }
+.root[dir="rtl"] .panel {
+  right: auto; left: 0; border-left: 0; border-right: 1px solid #e0e0e0;
+  box-shadow: 4px 0 16px rgba(0,0,0,.06); animation-name: slide-in-rtl;
+}
 .panel[hidden] { display: none; }
-@keyframes pop-in { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in-rtl { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
 
 /* ---------- Panel controls ---------- */
-/* The panel has no visual header; only its two controls float at the top-right. */
+/* One plain row, no bar: status at the start, refresh/close at the end. */
 .header {
-  position: absolute; top: 10px; right: 10px; z-index: 1;
-  display: flex; align-items: center; padding: 0;
-  background: transparent; color: var(--muted); direction: ltr;
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  height: 56px; padding: 0 12px 0 18px; background: transparent; color: var(--muted);
 }
-.root[dir="rtl"] .header { right: 10px; left: auto; }
-/* Status in the same row as the refresh/close buttons, centred with them - no header bar. */
-.header { gap: 6px; }
+.root[dir="rtl"] .header { padding: 0 18px 0 12px; }
+/* Menu (chat history) then the status, at the start of the row. */
+.start { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .status {
-  display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px;
+  display: flex; align-items: center; gap: 6px; height: 32px; padding: 0;
   font-size: 12px; line-height: 1; color: var(--muted); white-space: nowrap;
 }
 .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
@@ -93,43 +105,64 @@ export const STYLES = `
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 
 .actions {
-  display: flex; align-items: center; gap: 1px;
+  display: flex; align-items: center; gap: 2px;
   background: transparent;
 }
+/* Small, see-through icons; solid on hover. */
 .action {
-  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%;
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; color: #4b5563; cursor: pointer; opacity: .9;
+  background: transparent; color: #424242; cursor: pointer; opacity: .5;
   transition: background-color .15s ease, opacity .15s ease;
 }
-.action:hover { background: rgba(16,24,40,.06); color: var(--p); opacity: 1; }
+.action:hover { background: rgba(0,0,0,.05); opacity: 1; }
 .action:focus-visible { opacity: 1; }
-.action svg { width: 16px; height: 16px; }
+.action svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.action.reset svg, .action.close svg { width: 14px; height: 14px; }
+/* Data protection shield: a link once the product sets its policy URL, otherwise just the badge. */
+/* Data protection: a lock in the product colour, with a small card on hover or focus. */
+.protect { position: relative; display: flex; }
+.action.privacy { color: var(--p); cursor: default; }
+.protect:hover .action.privacy, .action.privacy:focus-visible { opacity: 1; background: rgba(0,0,0,.05); }
+/* One look for every hover card: the data protection note and each control's label. */
+.protect-tip, .tip {
+  width: max-content; max-width: 240px; padding: 8px 12px; border-radius: 8px;
+  background: #fff; color: var(--ink); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere;
+  box-shadow: 0 4px 16px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.05);
+  visibility: hidden; opacity: 0; transition: opacity .12s ease, visibility .12s;
+}
+.protect-tip { position: absolute; top: 100%; inset-inline-end: -8px; z-index: 3; margin-top: 6px; }
+.tip { position: fixed; top: 0; left: 0; z-index: 5; padding: 6px 10px; pointer-events: none; }
+.tip.show { visibility: visible; opacity: 1; }
+/* Invisible bridge over the gap, so the pointer can move from the lock onto the link. */
+.protect-tip::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; }
+.protect:hover .protect-tip, .protect:focus-within .protect-tip { visibility: visible; opacity: 1; }
+.protect-name { color: inherit; font-weight: 600; }
+a.protect-name { text-decoration: underline; text-underline-offset: 2px; }
+a.protect-name:hover { color: var(--p); }
 
 /* ---------- Messages ---------- */
 .messages {
-  /* Top padding clears the floating status/buttons row so it never covers a message. */
-  flex: 1 1 auto; padding: 48px 16px 8px; overflow-y: auto; background: var(--surface);
+  flex: 1 1 auto; padding: 8px 24px 12px; overflow-y: auto; background: var(--surface);
   scrollbar-width: thin; scrollbar-color: #cfd4da transparent;
 }
 .messages::-webkit-scrollbar { width: 6px; }
 .messages::-webkit-scrollbar-thumb { background: #cfd4da; border-radius: 3px; }
-.message { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 14px; animation: rise .2s ease; }
+.message { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 18px; animation: rise .2s ease; }
 .message.bot { align-items: flex-start; }
-.message.welcome { min-height: 32px; padding-right: 64px; }
+/* Welcome: its first paragraph is the pane's title, the rest a short intro. */
+.message.welcome { margin: 4px 0 20px; }
+.message.welcome .bubble > :first-child { margin-bottom: 12px; font-size: 20px; font-weight: 700; line-height: 1.35; }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* The user's message is a soft bubble; replies are plain text on the pane, full width. */
 .bubble {
-  max-width: 82%; padding: 10px 14px; border-radius: 18px 18px 6px 18px;
-  font-size: 14px; line-height: 1.5; word-break: break-word; white-space: pre-wrap;
-  background: var(--p); color: var(--on-p);
-  box-shadow: 0 1px 2px rgba(16,24,40,.08);
+  max-width: 85%; padding: 10px 14px; border-radius: 16px;
+  font-size: 15px; line-height: 1.6; word-break: break-word; white-space: pre-wrap;
+  background: #ebebeb; background: color-mix(in srgb, var(--p) 10%, #ececec); color: var(--ink);
 }
-.root[dir="rtl"] .bubble { border-radius: 18px 18px 18px 6px; }
 .message.bot .bubble {
-  white-space: normal; background: #fff; color: var(--ink);
-  border-radius: 18px 18px 18px 6px; box-shadow: 0 1px 2px rgba(16,24,40,.06), 0 0 0 1px var(--line);
+  max-width: 100%; padding: 0; white-space: normal; background: transparent; border-radius: 0;
 }
-.root[dir="rtl"] .message.bot .bubble { border-radius: 18px 18px 6px 18px; }
 .notice { font-size: 12px; color: var(--muted); margin: 6px 6px 0; font-style: italic; }
 .time { margin: 5px 6px 0; font-size: 11px; line-height: 1; color: #9aa1ab; font-variant-numeric: tabular-nums; }
 
@@ -140,7 +173,7 @@ export const STYLES = `
 .bubble li + li { margin-top: 2px; }
 .root[dir="rtl"] .bubble ul, .root[dir="rtl"] .bubble ol { padding-left: 0; padding-right: 20px; }
 .bubble code { padding: 1px 5px; border-radius: 5px; background: rgba(16,24,40,.07); font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-.bubble pre { padding: 10px 12px; border-radius: 10px; background: #f3f4f6; overflow-x: auto; }
+.bubble pre { padding: 10px 12px; border-radius: 10px; background: #f0f0f0; overflow-x: auto; }
 .bubble pre code { padding: 0; background: none; }
 .bubble table { width: 100%; border-collapse: collapse; font-size: 12.5px; overflow: hidden; border-radius: 8px; }
 .bubble th { background: #f3f4f6; font-weight: 600; text-align: start; }
@@ -149,16 +182,12 @@ export const STYLES = `
 .root[dir="rtl"] .bubble blockquote { padding-left: 0; padding-right: 10px; border-left: 0; border-right: 3px solid var(--line); }
 .bubble a { color: inherit; text-decoration: underline; text-underline-offset: 2px; word-break: break-word; }
 .message.bot .bubble a { color: var(--p); }
-.bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 4px 0 6px; font-size: 14px; font-weight: 700; }
+.bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 4px 0 6px; font-size: 15px; font-weight: 700; }
 .bubble hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .bubble img { display: block; max-width: 100%; max-height: 240px; border-radius: 10px; margin: 6px 0; }
 
 /* Typing: three dots in their own reply bubble. */
-.typing {
-  display: inline-flex; align-items: center; gap: 4px; padding: 14px 16px; margin-bottom: 14px;
-  background: #fff; border-radius: 18px 18px 18px 6px; box-shadow: 0 1px 2px rgba(16,24,40,.06), 0 0 0 1px var(--line);
-}
-.root[dir="rtl"] .typing { border-radius: 18px 18px 6px 18px; }
+.typing { display: inline-flex; align-items: center; gap: 4px; padding: 8px 0; margin-bottom: 18px; }
 .typing span { width: 7px; height: 7px; border-radius: 50%; background: #9aa1ab; animation: bounce 1.2s ease-in-out infinite; }
 .typing span:nth-child(2) { animation-delay: .15s; }
 .typing span:nth-child(3) { animation-delay: .3s; }
@@ -224,27 +253,20 @@ export const STYLES = `
 .file-action svg { width: 16px; height: 16px; }
 
 /* ---------- Starter options ---------- */
-.options { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 12px; }
+/* Suggestions: grey pills, one per line. */
+.options { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin: 0 0 18px; }
 .option {
-  max-width: 100%; padding: 8px 14px; border: 0; border-radius: 999px;
-  background: #fff; color: var(--p); font: inherit; font-size: 13px; font-weight: 500; text-align: start; cursor: pointer;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--p) 35%, transparent), 0 1px 2px rgba(16,24,40,.05);
-  transition: background-color .15s ease, color .15s ease, transform .15s ease;
+  max-width: 100%; padding: 10px 16px; border: 0; border-radius: 14px;
+  background: #f0f0f0; color: #424242; font: inherit; font-size: 15px; line-height: 1.45; text-align: start; cursor: pointer;
+  transition: background-color .15s ease;
 }
-.option:hover:not(:disabled) { background: var(--p); color: var(--on-p); transform: translateY(-1px); }
+.option:hover:not(:disabled) { background: #e6e6e6; }
 .option:disabled { opacity: .5; cursor: default; }
 
 /* ---------- Composer ---------- */
-.composer {
-  flex: 0 0 auto; padding: 10px 14px 14px;
-  background: #f7f9fc; border-top: 1px solid #edf0f5;
-}
-.composer-meta { display: flex; justify-content: flex-end; min-height: 18px; margin: 0 4px 7px; }
-.powered {
-  display: inline-flex; align-items: center; gap: 5px; direction: ltr;
-  color: #7a8495; font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
-}
-.powered svg { width: 14px; height: 14px; flex: 0 0 auto; color: var(--p); }
+.composer { flex: 0 0 auto; padding: 8px 24px 10px; background: var(--surface); }
+/* Footer under the input. */
+.powered { margin-top: 10px; text-align: center; color: #616161; font-size: 12px; line-height: 1.4; }
 .powered-label { unicode-bidi: plaintext; }
 
 /* Attached files waiting to be sent: chips above the input. */
@@ -252,7 +274,7 @@ export const STYLES = `
 .attachments[hidden] { display: none; }
 .chip {
   display: flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; padding: 5px 6px 5px 5px;
-  border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line);
+  border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px var(--line);
 }
 .root[dir="rtl"] .chip { padding: 5px 5px 5px 6px; }
 .chip.error { background: #fef2f2; box-shadow: inset 0 0 0 1px #fecaca; }
@@ -281,17 +303,16 @@ export const STYLES = `
 
 /* Attachment action, presented as the plus control inside the input bar. */
 .attach {
-  flex: 0 0 auto; width: 38px; height: 38px; margin: 0; padding: 0; border: 0; border-radius: 50%;
+  flex: 0 0 auto; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--muted); cursor: pointer; transition: background-color .15s ease, color .15s ease;
+  background: transparent; color: #424242; cursor: pointer; transition: background-color .15s ease, color .15s ease;
 }
 .attach[hidden] { display: none; }
 .attach:hover:not(:disabled) { background: var(--p-soft); color: var(--p); }
 .attach:disabled { opacity: .45; cursor: default; }
-.attach svg { width: 19px; height: 19px; }
+.attach svg { width: 20px; height: 20px; stroke-width: 1.6; }
 
 /* Shown over the panel while files are dragged onto it. */
-.panel { position: relative; }
 .drop-hint {
   position: absolute; inset: 10px; z-index: 2; border-radius: 16px;
   display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px;
@@ -300,36 +321,52 @@ export const STYLES = `
   pointer-events: none;
 }
 .drop-hint[hidden] { display: none; }
+/* A white pill: plus, text, send. */
 .composer-box {
-  display: flex; align-items: center; gap: 8px; min-height: 62px; padding: 10px 10px 10px 12px;
-  border-radius: 20px; background: #fff;
-  box-shadow: 0 0 0 1px #e4e8ef, 0 8px 24px rgba(31,41,55,.07);
-  transition: box-shadow .15s ease, background-color .15s ease;
+  display: flex; align-items: center; gap: 6px; min-height: 50px; padding: 6px 8px;
+  border-radius: 25px; background: #fff; box-shadow: 0 0 0 1px #d1d1d1;
+  transition: box-shadow .15s ease;
 }
-.root[dir="rtl"] .composer-box { padding: 10px 12px 10px 10px; }
-.composer-box:focus-within { box-shadow: 0 0 0 1.5px var(--p), 0 8px 24px rgba(31,41,55,.09), 0 0 0 4px var(--p-soft); }
+.composer-box:focus-within { box-shadow: 0 0 0 1.5px var(--p); }
+.attach[hidden] ~ .input { margin-inline-start: 10px; }
 .input {
-  flex: 1 1 auto; height: 40px; max-height: 120px; min-height: 40px; padding: 10px 0; resize: none; overflow-y: auto;
-  border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 20px; outline: none;
+  flex: 1 1 auto; height: 36px; max-height: 120px; min-height: 36px; padding: 8px 0; resize: none; overflow-y: auto;
+  border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 20px; outline: none;
 }
-.input::placeholder { color: #8490a3; opacity: 1; }
+.input::placeholder { color: #707070; opacity: 1; }
 .send {
-  flex: 0 0 auto; width: 40px; height: 40px; border: 0; border-radius: 50%;
+  flex: 0 0 auto; width: 34px; height: 34px; border: 0; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   background: var(--p); color: var(--on-p); cursor: pointer;
-  transition: transform .15s ease, opacity .15s ease, background-color .15s ease;
+  transition: background-color .15s ease, transform .15s ease;
 }
 .send:hover:not(:disabled) { transform: scale(1.06); }
-.send:disabled { background: #d5d9df; color: #fff; cursor: not-allowed; }
-.send svg { width: 16px; height: 16px; }
-.root[dir="rtl"] .send svg { transform: scaleX(-1); }
+/* Like Copilot: the send button only appears once there is something to send. */
+.send:disabled { display: none; }
+.send svg { width: 18px; height: 18px; }
+
+/* Mic: same plain icon as the plus; while listening it fills with the product colour and pulses. */
+.mic {
+  flex: 0 0 auto; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: #424242; cursor: pointer; transition: background-color .15s ease, color .15s ease;
+}
+.mic[hidden] { display: none; }
+.mic:hover:not(:disabled) { background: rgba(0,0,0,.05); }
+.mic:disabled { opacity: .45; cursor: default; }
+.mic svg { width: 20px; height: 20px; stroke-width: 1.6; }
+.mic.listening, .mic.listening:hover { background: var(--p); color: var(--on-p); animation: listening 1.4s ease-out infinite; }
+@keyframes listening {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--p) 45%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
+}
 button:focus-visible { outline: 2px solid var(--p); outline-offset: 2px; }
 .header button:focus-visible { outline-color: var(--p); }
 
 @media (max-width: 575px) {
   .root { right: 12px; }
   .root[dir="rtl"] { left: 12px; }
-  .panel { width: calc(100vw - 24px); height: calc(100vh - 120px); border-radius: 16px; }
+  .panel { width: 100vw; border: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
