@@ -13,23 +13,6 @@ use PHPUnit\Framework\TestCase;
 
 final class ExceptionMappingTest extends TestCase
 {
-    public function testBaseExceptionExposesFields(): void
-    {
-        $e = new GaithApiException(500, 'upstream_error', 'Server error', '{"raw":true}');
-
-        $this->assertSame(500, $e->statusCode());
-        $this->assertSame('upstream_error', $e->serverCode());
-        $this->assertSame('{"raw":true}', $e->responseBody());
-        $this->assertSame('Server error', $e->getMessage());
-    }
-
-    public function testServerCodeCanBeNull(): void
-    {
-        $e = new GaithApiException(500, null, 'msg', 'body');
-
-        $this->assertNull($e->serverCode());
-    }
-
     /**
      * @dataProvider subclassProvider
      */

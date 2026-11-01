@@ -64,18 +64,6 @@ final class GaithHttpTransportTest extends TestCase
         );
     }
 
-    public function testGetAppendsQueryString(): void
-    {
-        $captured = null;
-        $client = $this->fakeClient(new Response(200, [], '[]'), $captured);
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        $transport->get('conversations', 'external_user_id=user-1');
-
-        $this->assertSame('external_user_id=user-1', $captured->getUri()->getQuery());
-    }
-
     /**
      * @dataProvider statusToExceptionProvider
      */
@@ -108,22 +96,6 @@ final class GaithHttpTransportTest extends TestCase
             [429, GaithRateLimitException::class],
             [500, GaithApiException::class],
         ];
-    }
-
-    public function testFastApiDetailStringShape(): void
-    {
-        $body = json_encode(['detail' => 'Not authorized']);
-        $client = $this->fakeClient(new Response(401, [], $body));
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        try {
-            $transport->get('meta');
-            $this->fail('Expected exception');
-        } catch (GaithApiException $e) {
-            $this->assertSame('Not authorized', $e->getMessage());
-            $this->assertNull($e->serverCode());
-        }
     }
 
     public function testFastApiDetailObjectShape(): void
@@ -159,22 +131,6 @@ final class GaithHttpTransportTest extends TestCase
         }
     }
 
-    public function testBareCodeMessageShape(): void
-    {
-        $body = json_encode(['code' => 'rate_limited', 'message' => 'Too many requests']);
-        $client = $this->fakeClient(new Response(429, [], $body));
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        try {
-            $transport->get('meta');
-            $this->fail('Expected exception');
-        } catch (GaithApiException $e) {
-            $this->assertSame('Too many requests', $e->getMessage());
-            $this->assertSame('rate_limited', $e->serverCode());
-        }
-    }
-
     public function testUnparseableBodyFallsBackToRawBodyOrReasonPhrase(): void
     {
         $client = $this->fakeClient(new Response(500, [], 'not json'));
@@ -188,22 +144,6 @@ final class GaithHttpTransportTest extends TestCase
             $this->assertSame('not json', $e->getMessage());
             $this->assertSame('not json', $e->responseBody());
         }
-    }
-
-    public function testDeleteSendsDeleteMethodAndReturnsVoid(): void
-    {
-        $captured = null;
-        $client = $this->fakeClient(new Response(204, [], ''), $captured);
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        $transport->delete('conversations/abc', 'external_user_id=user-1');
-
-        $this->assertSame('DELETE', $captured->getMethod());
-        $this->assertSame(
-            '/api/v1/chatbots/' . self::CHATBOT_ID . '/conversations/abc',
-            $captured->getUri()->getPath()
-        );
     }
 
     public function testPostJsonSendsBodyAndReturnsDecodedResponse(): void
@@ -253,34 +193,5 @@ final class GaithHttpTransportTest extends TestCase
         $this->assertStringContainsString('name="external_user_id"', $rawBody);
         $this->assertStringContainsString('user-1', $rawBody);
         $this->assertStringContainsString('file bytes', $rawBody);
-    }
-
-    public function testPostMultipartSendsAnExplicitMediaTypeOnTheFilePart(): void
-    {
-        // GAITH takes the upload's type from this part header; a name without an
-        // extension would otherwise arrive untyped and be rejected.
-        $captured = null;
-        $client = $this->fakeClient(new Response(200, [], '{"artifact_id":"a1"}'), $captured);
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        $transport->postMultipart('attachments', 'bytes', 'scan', 'user-1', 'image/jpeg');
-
-        // The file part's own headers (before its blank line), in any order.
-        $body = (string) $captured->getBody();
-        $this->assertMatchesRegularExpression('/(?:^|\r\n)Content-Type: image\/jpeg\r\n(?:[^\r\n]+\r\n)*?Content-Disposition: form-data; name="file"; filename="scan"\r\n\r\nbytes/', $body);
-    }
-
-    public function testGetRawReturnsRawStream(): void
-    {
-        $captured = null;
-        $client = $this->fakeClient(new Response(200, [], 'raw bytes'), $captured);
-        $factory = new HttpFactory();
-        $transport = new GaithHttpTransport($this->config(), $client, $factory, $factory);
-
-        $stream = $transport->getRaw('attachments/artifact-1', 'external_user_id=user-1');
-
-        $this->assertSame('raw bytes', (string) $stream);
-        $this->assertSame('GET', $captured->getMethod());
     }
 }

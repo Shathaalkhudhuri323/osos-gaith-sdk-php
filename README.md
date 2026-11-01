@@ -101,9 +101,10 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
 2. `php artisan vendor:publish --tag=gaith-chatbot-config` and in `config/gaith-chatbot.php` set
    `widget.middleware` to **your app's auth stack**. Example for the ERP:
    `['api', 'auth.api.keycloak', 'request.signature']`.
-3. Set `GAITH_CHAT_WIDGET_ENABLED=true`, `GAITH_CHAT_WIDGET_PREFIX=api/v1/gaith` and
-   `GAITH_CHAT_WIDGET_USER_PREFIX=erp-user-` (a unique prefix per product).
-4. `php artisan vendor:publish --tag=gaith-chat-assets` copies the widget to
+3. Set `GAITH_CHAT_WIDGET_ENABLED=true`, `GAITH_CHAT_WIDGET_PREFIX=api/v1/gaith`, and tell the SDK
+   who the signed-in user is (see *Who is chatting* below).
+4. The chat box script is served by the SDK at `{prefix}/gaith-chat.js`. Only if you would rather serve
+   it as a static file, `php artisan vendor:publish --tag=gaith-chat-assets` copies the widget to
    `public/vendor/gaith-chat/gaith-chat.js`. Re-run it after every SDK update so widget and routes match.
 
 5. Optional: set this product's colours with `GAITH_CHAT_WIDGET_PRIMARY_COLOR` / `GAITH_CHAT_WIDGET_TEXT_COLOR`
@@ -130,11 +131,12 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
    `post_max_size` to at least 20M (PHP defaults to 2M), and the web server's body limit (nginx
    `client_max_body_size`).
 
-This registers five routes:
+This registers six routes:
 
 | Route | Purpose |
 |---|---|
 | `GET {prefix}/config` | Per-product settings (colours, allowed image origins, attachment limits) |
+| `GET {prefix}/status` | `{enabled}`: is the chatbot switched on for this user's customer? Asks GAITH (`GET access`), cached per customer for `GAITH_CHAT_WIDGET_STATUS_CACHE_SECONDS` (60; failures 10 s); anything but a clear yes is `false` |
 | `POST {prefix}/attachments` (multipart `file`) | Uploads one attached file to GAITH, returns its `artifact_id` |
 | `POST {prefix}/stream` `{message, conversation_id?, attachments?}` | One chat turn, streamed back as SSE |
 | `GET {prefix}/conversations/{id}/messages` | History, including each message's files |
@@ -150,8 +152,61 @@ Images (PNG/JPEG/GIF/WebP) show inline; PDFs open in a new tab; other types down
 back with the history (GAITH keeps them 30 days, then they show as expired). The browser never sees
 GAITH's download URL: every file goes through `{prefix}/files/…` with the host's own auth.
 
-The user is resolved server-side from `$request->user()`. To map users differently, bind your own
-`Osos\Gaith\Sdk\Laravel\Http\GaithUserResolver` or set `widget.user_resolver`.
+**Who is chatting:** the SDK reads the product, the customer and the person from the signed-in user
+on the server, and joins them into the GAITH user id (`qhse:7:42`). Customers and products therefore
+never share a chat history, even when two customers have an employee with the same number. Nothing
+the browser sends (a `selectedCompany` header, a body field) is ever used.
+
+| Setting | QHSE | ERP |
+|---|---|---|
+| `GAITH_IDENTITY_PRODUCT` | `qhse` | `erp` |
+| `GAITH_IDENTITY_CUSTOMER` | `user:employee.centralDBCompanyID` | `config:database.connections.mysql.database` |
+| `GAITH_IDENTITY_PERSON` | `user:employee.employeeSystemID` | *(empty: the user's id)* |
+
+`user:<path>` reads the signed-in user (dots follow relations), `config:<key>` a config value the host
+sets on the server (the ERP's tenant middleware selects the tenant database), `value:<text>` a fixed
+value for a one-customer deployment. A user the settings cannot identify (say, a QHSE user with no
+employee record) gets a 401; a missing or malformed setting is an error, not a 401 for everyone. A
+product whose ids do not fit these sources names its own `Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver`
+in `identity.resolver`.
+
+**Identity proof key:** with every request it makes for a user (chat, history, uploads, files) the SDK
+sends GAITH a fresh signed proof of who is chatting, in the `X-Gaith-Identity-Proof` header: an RS256 JWT with `iss` (product), `sub` (person), `tenant` (customer), `aud` (chatbot id),
+`iat`, `exp` (2 minutes) and a one-use `jti`. Make one key pair per environment:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out gaith-proof.pem
+openssl pkey -in gaith-proof.pem -pubout -out gaith-proof.pub.pem
+```
+
+The private key goes into the host's secret store, never into Git, email or chat; set
+`GAITH_PROOF_PRIVATE_KEY_PATH` to its file (or `GAITH_PROOF_PRIVATE_KEY` to its text, newlines as `\n`)
+and `GAITH_PROOF_KEY_ID` to a name such as `qhse-prod-1`. The public key and that name are registered
+on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default). Without a key
+the widget routes answer 500 and send nothing to GAITH, rather than chat without a proof.
+
+**Trying it without GAITH:** `examples/fake-gaith/` is a stand-in GAITH that checks every proof the way
+GAITH will and replies with who you are. Point `GAITH_CHATBOT_BASE_URL` at it; its README has the steps.
+
+**Trace id:** each browser request gets one id, made on the server (never taken from the browser).
+It goes to GAITH as `X-Trace-ID` on every call for that request (a resumed stream keeps it), into
+this app's log (`GAITH chat turn started` and every failure, as `trace_id`), and back to the browser
+in the chat response's `X-Trace-ID` header, for users to quote to support. Messages, proofs and
+tokens are never logged.
+
+**Long replies and PHP workers (for DevOps):** each open reply keeps one PHP worker busy for as long
+as it streams, and a reply may run long when the chatbot calls tools or workflows.
+
+- One user may have `GAITH_CHAT_WIDGET_MAX_STREAMS_PER_USER` replies open at once (default 2); more
+  get `429 too_many_streams` before anything reaches GAITH. The count lives in the cache, so use a
+  store with atomic writes (redis, memcached, database), not the file store.
+- A reply is stopped after `GAITH_CHAT_WIDGET_MAX_REPLY_SECONDS` (default 3600). GAITH's own
+  per-chatbot limit still applies and is usually shorter (at most 600 s today).
+- Give the SDK routes their own PHP-FPM pool, sized for the number of replies you expect at once,
+  so long chats cannot use up the workers QHSE's normal pages need.
+- Proxies in front (nginx `proxy_read_timeout`, load balancers) must allow a long response. Heartbeats
+  arrive about every 15 s, so an idle timeout above 30 s is enough; a cap on total response time must
+  be above the reply time limit.
 
 **Behind nginx:** responses already send `X-Accel-Buffering: no`. Make sure no other proxy buffers or
 times out `text/event-stream` responses. Heartbeats are relayed every ~15s.
@@ -159,8 +214,9 @@ times out `text/event-stream` responses. Heartbeats are relayed every ~15s.
 ### Frontend (any framework)
 
 ```html
-<!-- Add the SDK version so browsers fetch the new widget after each update. -->
-<script src="https://your-backend/vendor/gaith-chat/gaith-chat.js?v=0.2.0"></script>
+<!-- Served by the SDK at {prefix}/gaith-chat.js: no sign-in needed, cached 5 minutes,
+     so a `composer update` reaches users without a publish step or version in the URL. -->
+<script src="https://your-backend/api/gaith/gaith-chat.js"></script>
 
 <gaith-chat endpoint="api/v1/gaith" lang="en" bot-name="GAITH"></gaith-chat>
 ```
@@ -192,6 +248,18 @@ chat.options = {
 | `lang` | `en` or `ar` (RTL); falls back to `<html lang>` |
 | `bot-name` | Header title |
 | `launcher-icon` | Optional image URL for the floating button |
+| `token-storage-key` | localStorage key of the page's sign-in token, sent as `Authorization: Bearer …` to `endpoint` on every request (read fresh each time). Used only when `getHeaders` is not set |
+| `lang-storage-key` | localStorage key of the page's language (`en`/`ar`), used when there is no `lang` attribute |
+
+**No host JavaScript (QHSE):** the page keeps its token and language in localStorage, so the tag alone is
+enough. Put it in `index.html`; no `getHeaders`, no Angular change:
+
+```html
+<script src="https://qhse-api.example.com/api/gaith/gaith-chat.js"></script>
+<gaith-chat endpoint="https://qhse-api.example.com/api/gaith" token-storage-key="access_token" lang-storage-key="lang"></gaith-chat>
+```
+
+A host that signs requests beyond a bearer token (the ERP's request signature) still sets `getHeaders`.
 
 Methods: `open()`, `close()`, `reset()`, `send(text)`. Events: `gaith-chat:error` (`detail.code`), and
 `gaith-chat:history` when the menu at the top left is clicked (a placeholder until chat history ships).

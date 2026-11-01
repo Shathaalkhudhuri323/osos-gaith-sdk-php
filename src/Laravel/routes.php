@@ -4,6 +4,15 @@ use Illuminate\Support\Facades\Route;
 use Osos\Gaith\Sdk\Laravel\Http\GaithChatController;
 
 /*
+ * The chat box script. It is outside the signed-in routes on purpose: a plain <script> tag
+ * cannot send the product's sign-in token, and the file holds nothing private.
+ */
+Route::get(
+    trim(config('gaith-chatbot.widget.prefix', 'api/gaith'), '/') . '/gaith-chat.js',
+    [GaithChatController::class, 'script']
+)->name('gaith-chat.script');
+
+/*
  * Routes for the <gaith-chat> widget. Loaded only when gaith-chatbot.widget.enabled
  * is true; prefix and middleware come from config so each host app puts them
  * behind its own authentication.
@@ -13,6 +22,7 @@ Route::group([
     'middleware' => config('gaith-chatbot.widget.middleware', ['api', 'auth']),
 ], function () {
     Route::get('config', [GaithChatController::class, 'config'])->name('gaith-chat.config');
+    Route::get('status', [GaithChatController::class, 'status'])->name('gaith-chat.status');
     Route::post('stream', [GaithChatController::class, 'stream'])->name('gaith-chat.stream');
     Route::post('attachments', [GaithChatController::class, 'upload'])->name('gaith-chat.upload');
     Route::get('conversations/{conversation}/messages', [GaithChatController::class, 'messages'])

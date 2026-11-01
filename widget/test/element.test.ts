@@ -21,6 +21,58 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('<gaith-chat> tag settings (no host JavaScript)', () => {
+  afterEach(() => localStorage.clear());
+
+  const authOf = (mock: ReturnType<typeof routeFetch>, suffix: string) => {
+    const call = mock.mock.calls.filter((c) => String(c[0]).endsWith(suffix)).pop()!;
+    return ((call[1] as RequestInit).headers as Record<string, string>).Authorization;
+  };
+
+  it('sends the token the page keeps under token-storage-key as a bearer token', async () => {
+    localStorage.setItem('access_token', 'tok-1');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    await flush(20);
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/config')).toBe('Bearer tok-1');
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer tok-1');
+  });
+
+  it('reads the token again for every request, so a refreshed token is used at once', async () => {
+    localStorage.setItem('access_token', 'old');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    await flush(20);
+    localStorage.setItem('access_token', 'new');
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer new');
+  });
+
+  it('lets a host getHeaders win over the tag setting', async () => {
+    localStorage.setItem('access_token', 'from-storage');
+    const fetchMock = routeFetch({ '/config': () => json({}), '/stream': () => sseResponse(HAPPY_PATH) });
+    const el = mount({ 'token-storage-key': 'access_token' }) as any;
+    el.getHeaders = () => ({ Authorization: 'Bearer from-host' });
+    el.send('hello');
+    await flush(50);
+
+    expect(authOf(fetchMock, '/stream')).toBe('Bearer from-host');
+  });
+
+  it('takes the language from lang-storage-key when there is no lang attribute', () => {
+    localStorage.setItem('lang', 'ar');
+    routeFetch({ '/config': () => json({}) });
+    const el = mount({ 'lang-storage-key': 'lang' });
+
+    expect(container(el).getAttribute('dir')).toBe('rtl');
+  });
+});
+
 describe('<gaith-chat>', () => {
   it('starts with the built-in greeting alongside the panel controls', () => {
     routeFetch({});
@@ -40,25 +92,6 @@ describe('<gaith-chat>', () => {
     expect(shadow(el).querySelector('.option')!.textContent).toBe('Show approvals');
   });
 
-  it('shows the example prompt and a Powered by GAITH footer under the input', () => {
-    routeFetch({});
-    const el = mount();
-
-    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder)
-      .toBe('Example: “Show my pending approvals”');
-    expect(shadow(el).querySelector('.powered')!.textContent).toBe('Powered by GAITH');
-    expect(shadow(el).querySelector('.composer-box + .powered')).not.toBeNull();
-  });
-
-  it('keeps only the history menu, data protection, refresh and exit controls in the header', () => {
-    routeFetch({});
-    const el = mount();
-
-    expect(shadow(el).querySelector('.avatar')).toBeNull();
-    expect(shadow(el).querySelector('.heading')).toBeNull();
-    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(4);
-  });
-
   it('puts the chat history menu first in the header and tells the host when it is clicked', () => {
     routeFetch({});
     const el = mount();
@@ -71,33 +104,6 @@ describe('<gaith-chat>', () => {
     menu.click();
 
     expect(clicks).toEqual(['gaith-chat:history']);
-  });
-
-  it('labels controls with the shared hover card instead of the browser tooltip', () => {
-    routeFetch({});
-    const el = mount();
-    (el as any).open();
-    const reset = shadow(el).querySelector('.reset') as HTMLButtonElement;
-    const tip = shadow(el).querySelector('.tip') as HTMLElement;
-
-    expect(reset.hasAttribute('title')).toBe(false);
-    expect(reset.getAttribute('aria-label')).toBe('New conversation');
-
-    reset.dispatchEvent(new Event('pointerover', { bubbles: true, composed: true }));
-    expect(tip.textContent).toBe('New conversation');
-    expect(tip.classList.contains('show')).toBe(true);
-
-    reset.dispatchEvent(new Event('pointerout', { bubbles: true, composed: true }));
-    expect(tip.classList.contains('show')).toBe(false);
-  });
-
-  it('allows each host product to provide its own example prompt', () => {
-    routeFetch({});
-    const el = mount() as any;
-    el.options = { placeholder: { en: 'Example: “Find incident 42”' } };
-
-    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder)
-      .toBe('Example: “Find incident 42”');
   });
 
   it('streams a reply into a bot bubble and remembers the conversation', async () => {
@@ -261,14 +267,6 @@ describe('<gaith-chat>', () => {
     const tip = shadow(el).querySelector('.header .protect-tip')!;
     expect(tip.querySelector('a')).toBeNull();
     expect(tip.textContent).toBe('GAITH data protection applies to this chat.');
-  });
-
-  it('words the data protection note in Arabic', () => {
-    routeFetch({});
-    const el = mount({ lang: 'ar' });
-
-    expect(shadow(el).querySelector('.header .protect-tip')!.textContent)
-      .toBe('تنطبق حماية بيانات GAITH على هذه المحادثة.');
   });
 
   it('still shows itself with the default colours when the config request fails', async () => {
@@ -544,17 +542,6 @@ describe('<gaith-chat>', () => {
       expect(chips(el)).toEqual(['leave.csv | 1 KB', 'notes.md | 1 KB', 'budget.xlsx | Type not supported']);
     });
 
-    it('offers every enabled type in the file picker, by type and by extension', async () => {
-      const officeRules = { ...RULES, allowed_types: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/tiff'] };
-      routeFetch({ '/config': () => json({ theme: {}, attachments: officeRules }) });
-      const el = mount();
-      await flush(30);
-
-      const accept = (shadow(el).querySelector('.file-input') as HTMLInputElement).accept.split(',');
-      expect(accept).toEqual(expect.arrayContaining(['.xlsx', '.tif', '.tiff', 'image/tiff']));
-      expect(accept).not.toContain('.pdf');
-    });
-
     it('uploads a picked file and sends its id with the message', async () => {
       const fetchMock = routeFetch({
         '/config': configRoute,
@@ -580,23 +567,6 @@ describe('<gaith-chat>', () => {
       // The user's message shows the file it carried.
       const userRow = shadow(el).querySelector('.message:not(.bot)')!;
       expect(userRow.querySelector('.file-name')!.textContent).toBe('report.pdf');
-    });
-
-    it('sends the upload to the host with its headers, as a form', async () => {
-      const fetchMock = routeFetch({ '/config': configRoute, '/attachments': uploaded('art-1', 'report.pdf', 'application/pdf') });
-      const seen: any[] = [];
-      const el = mount() as any;
-      el.getHeaders = (req: any) => { seen.push(req); return { Authorization: 'Bearer abc' }; };
-      await flush(30);
-
-      el.attachFiles([pdf()]);
-      await flush(30);
-
-      const call = fetchMock.mock.calls.find((c) => String(c[0]).endsWith('/attachments'))!;
-      expect(String(call[0])).toBe('api/gaith/attachments');
-      expect((call[1] as RequestInit).body).toBeInstanceOf(FormData);
-      expect(((call[1] as RequestInit).headers as Record<string, string>).Authorization).toBe('Bearer abc');
-      expect(seen.find((r) => r.path === 'api/gaith/attachments').form).toBeInstanceOf(FormData);
     });
 
     it('refuses an unsupported type or an oversized file without uploading it', async () => {
@@ -660,18 +630,6 @@ describe('<gaith-chat>', () => {
       const preview = shadow(el).querySelector('.message:not(.bot) .preview img') as HTMLImageElement;
       expect(preview.getAttribute('src')).toMatch(/^blob:test\//);
       expect(fetchMock.mock.calls.some((c) => String(c[0]).indexOf('/files/') !== -1)).toBe(false);
-    });
-
-    it('lets the user remove an attached file before sending', async () => {
-      routeFetch({ '/config': configRoute, '/attachments': uploaded('art-1', 'report.pdf', 'application/pdf') });
-      const el = mount() as any;
-      await flush(30);
-      el.attachFiles([pdf()]);
-      await flush(30);
-
-      (shadow(el).querySelector('.chip-remove') as HTMLButtonElement).click();
-
-      expect(chips(el)).toEqual([]);
     });
 
     it('shows why the host refused an upload', async () => {

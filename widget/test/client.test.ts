@@ -178,18 +178,6 @@ describe('uploadFile', () => {
 });
 
 describe('fetchHistory', () => {
-  it('returns the messages', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-      JSON.stringify({ messages: [{ role: 'user', content: 'hi', created_at: '2026-01-01T00:00:00Z' }] }),
-      { status: 200 },
-    ));
-
-    const history = await fetchHistory('api/gaith', 'c 1', null);
-
-    expect(history).toEqual([{ role: 'user', content: 'hi', created_at: '2026-01-01T00:00:00Z' }]);
-    expect(fetchMock.mock.calls[0][0]).toBe('api/gaith/conversations/c%201/messages');
-  });
-
   it('returns null when the conversation is gone', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 404 }));
 

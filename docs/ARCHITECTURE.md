@@ -320,9 +320,20 @@ That pairing is the main reason both halves live in this repo rather than an npm
 ### 11.2 Decisions and why
 
 - **The browser never talks to GAITH.** The API key is chatbot-scoped, so it stays on the server. The
-  GAITH `external_user_id` comes from `GaithUserResolver` (default: `$request->user()` plus a per-product
-  prefix), never from the request body. An unidentifiable caller gets a 401. It is never given an
+  GAITH `external_user_id` is `product:customer:person` from a `ProductUserResolver` (default: read from
+  `$request->user()` and server-side config as `gaith-chatbot.identity` describes), never from the request.
+  The customer is part of the id because product user ids are only unique within one customer. An unidentifiable caller gets a 401. It is never given an
   anonymous id, because that id partitions history.
+- **Identity proof, signed with ext-openssl.** `ProofSigner` makes a 2-minute RS256 JWT per request
+  (`iss` product, `sub` person, `tenant` customer, `aud` chatbot, one-use `jti`) that GAITH verifies
+  with the public key on the chatbot's API key. Only signing happens here, so no JWT library: the
+  risky half, verification, lives in GAITH. The key is held as an OpenSSL handle and hidden from
+  dumps, and setting errors name the setting, never the key. The widget routes attach it per HTTP
+  request in `X-Gaith-Identity-Proof` (`GaithUser::withProof`), so a resumed stream or each history
+  page gets its own `jti`, and its audience is the chatbot of the client actually sending it.
+- **One trace id per browser request**, server-made, sent as `X-Trace-ID` (the header GAITH already
+  reads into its trace context) on every GAITH call for that request, logged here and returned to
+  the browser. Unlike the proof it survives a resumed stream: one turn, one id.
 - **Routes are off by default** (`widget.enabled`). Enabling them is a security decision: the host must
   first put its own auth middleware in `widget.middleware`.
 - **Web Component, prebuilt ES2017 bundle.** Both target apps run Angular 5 / TypeScript 2.9, which

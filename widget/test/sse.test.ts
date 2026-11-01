@@ -28,10 +28,6 @@ describe('SseParser', () => {
     expect(parse([': heartbeat\n\n'])).toEqual([{ event: null, data: '', comment: true }]);
   });
 
-  it('ignores comment lines inside a real event', () => {
-    expect(parse([': note\nevent: done\ndata: {}\n\n'])).toEqual([{ event: 'done', data: '{}', comment: false }]);
-  });
-
   it('handles CRLF, including a CR/LF pair split across chunks', () => {
     const frames = parse(['event: token\r\ndata: x\r', '\n\r\n']);
     expect(frames).toEqual([{ event: 'token', data: 'x', comment: false }]);

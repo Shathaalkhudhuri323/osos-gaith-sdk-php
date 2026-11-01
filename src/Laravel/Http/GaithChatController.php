@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Osos\Gaith\Sdk\Attachments\AttachmentTypes;
@@ -18,7 +19,10 @@ use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
 use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
 use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\GaithChatbotClient;
+use Osos\Gaith\Sdk\Identity\ProductUser;
+use Osos\Gaith\Sdk\Identity\ProofSigner;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotClientFactory;
+use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 use Osos\Gaith\Sdk\Models\FileRef;
 use Osos\Gaith\Sdk\Models\MessagePageOptions;
 use Osos\Gaith\Sdk\Streaming\ChatEvent;
@@ -34,6 +38,8 @@ use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\TokenEvent;
 use Osos\Gaith\Sdk\Streaming\ToolCallEvent;
 use Osos\Gaith\Sdk\Streaming\ToolResultEvent;
+use Psr\Http\Client\ClientExceptionInterface;
+use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -58,13 +64,65 @@ final class GaithChatController extends Controller
     /** @var Container */
     private $app;
 
-    /** @var GaithUserResolver */
+    /** @var ProductUserResolver */
     private $users;
 
-    public function __construct(Container $app, GaithUserResolver $users)
+    /** @var string|null the trace id of this request, set once we know who the user is */
+    private $traceId;
+
+    /** @var ProductUser|null the user of this request, set once we know who they are */
+    private $productUser;
+
+    /** If asking GAITH "is the chatbot on?" fails, we remember that answer for only this many seconds. */
+    private const STATUS_FAILURE_CACHE_SECONDS = 10;
+
+    /** A reply's place in the per-user limit expires this many seconds after it was last renewed. */
+    private const STREAM_SLOT_SECONDS = 60;
+
+    /** How often a reply that is still streaming renews its place (well before it would expire). */
+    private const STREAM_SLOT_RENEW_SECONDS = 15;
+
+    public function __construct(Container $app, ProductUserResolver $users)
     {
         $this->app = $app;
         $this->users = $users;
+    }
+
+    /**
+     * Sends the chat box script (dist/gaith-chat.js) to the browser.
+     *
+     * Serving it from the SDK means a `composer update` delivers the new chat box, with no
+     * extra publish step. Browsers keep it for 5 minutes, then ask "has it changed?" using
+     * an ETag (a fingerprint of the file), so an update reaches users within a few minutes.
+     *
+     * We do not serve the source map file, because it would give out the chat box's source code.
+     */
+    public function script(Request $request): Response
+    {
+        $path = self::scriptPath();
+        $stat = @stat($path);
+        if ($stat === false) {
+            return new Response('', 404);
+        }
+
+        $etag = '"' . sha1($stat['mtime'] . ':' . $stat['size']) . '"';
+        $headers = [
+            'Content-Type' => 'application/javascript; charset=utf-8',
+            'Cache-Control' => 'public, max-age=300',
+            'ETag' => $etag,
+            'X-Content-Type-Options' => 'nosniff',
+        ];
+
+        if (in_array($etag, $request->getETags(), true)) {
+            return new Response('', 304, $headers);
+        }
+
+        return new Response((string) file_get_contents($path), 200, $headers);
+    }
+
+    private static function scriptPath(): string
+    {
+        return dirname(__DIR__, 3) . '/dist/gaith-chat.js';
     }
 
     /**
@@ -324,8 +382,19 @@ final class GaithChatController extends Controller
         $client = $this->client();
         $message = $validated['message'];
 
-        $response = new StreamedResponse(function () use ($client, $user, $message, $options) {
-            $this->relay($client, $user, $message, $options);
+        $slot = $this->takeStreamSlot($user);
+        if ($slot === null) {
+            // The user already has the maximum number of replies running. We refuse before
+            // contacting GAITH, so nothing is spent on GAITH's side.
+            return new JsonResponse(['code' => 'too_many_streams'], 429, ['Retry-After' => '15']);
+        }
+
+        $response = new StreamedResponse(function () use ($client, $user, $message, $options, $slot) {
+            try {
+                $this->relay($client, $user, $message, $options, $slot);
+            } finally {
+                $this->releaseStreamSlot($slot);
+            }
         });
 
         $response->headers->set('Content-Type', 'text/event-stream');
@@ -334,6 +403,61 @@ final class GaithChatController extends Controller
         // Tells nginx not to buffer the response into a single blob, which would
         // defeat streaming without producing any error.
         $response->headers->set('X-Accel-Buffering', 'no');
+        // The trace id goes back to the browser too, so a user can quote it to support.
+        // GAITH's logs show the same id for this message.
+        $response->headers->set(GaithUser::TRACE_HEADER, (string) $user->traceId());
+
+        // We log only the trace id. The message text, the user and the proof are never logged.
+        Log::info('GAITH chat turn started', ['trace_id' => $user->traceId()]);
+
+        return $response;
+    }
+
+    /**
+     * Answers the chat box's first question when the page loads: "should I show myself?"
+     * That depends on whether the chatbot is switched on for the user's customer. Only GAITH
+     * keeps that list, so we ask GAITH; the product keeps no list of its own.
+     *
+     * The answer is "on" only when GAITH clearly says yes. If GAITH refuses, errors or cannot
+     * be reached, the answer is "off": chatting would not work then anyway, so it is better to
+     * hide the chat box. Each failure is logged so an admin can see why the chat box is hidden.
+     *
+     * Every page load asks this, so we keep GAITH's answer in the cache for a while, per chatbot
+     * and customer (all users of one customer get the same answer). The time is the
+     * `widget.status_cache_seconds` setting, 60 seconds by default; it is also how long a
+     * switch-off can take to show. A failed answer is kept for only a few seconds, so that
+     * while GAITH is down we do not call it on every page load, but recover quickly once it is back.
+     */
+    public function status(Request $request): JsonResponse
+    {
+        $user = $this->userOrAbort($request);
+        $client = $this->client();
+
+        $ttl = max(0, (int) config('gaith-chatbot.widget.status_cache_seconds', 60));
+        $key = 'gaith-chat:status:' . $client->chatbotId() . ':' . $this->productUser->product()
+            . ':' . $this->productUser->customer();
+        $cached = $ttl > 0 ? Cache::get($key) : null;
+
+        if (is_bool($cached)) {
+            $enabled = $cached;
+        } else {
+            try {
+                $enabled = $client->isEnabledFor($user);
+                $keepFor = $ttl;
+            } catch (GaithApiException | ClientExceptionInterface $e) {
+                $this->logFailure('status_failed', $e);
+                $enabled = false;
+                $keepFor = min($ttl, self::STATUS_FAILURE_CACHE_SECONDS);
+            }
+            if ($keepFor > 0) {
+                Cache::put($key, $enabled, $keepFor);
+            }
+        }
+
+        $response = new JsonResponse(['enabled' => $enabled]);
+        // The browser must not keep this answer: it is about this user, and a switch-off
+        // should show on the next page load.
+        $response->headers->set('Cache-Control', 'no-store, private');
 
         return $response;
     }
@@ -403,12 +527,16 @@ final class GaithChatController extends Controller
      * Any failure is reported as a terminal error frame rather than a dropped
      * socket, so the widget always has something definite to render.
      */
-    private function relay(GaithChatbotClient $client, GaithUser $user, string $message, array $options): void
+    private function relay(GaithChatbotClient $client, GaithUser $user, string $message, array $options, string $slot): void
     {
-        // The turn may legitimately run for minutes (tool calls); the resume window
-        // inside the SDK, not PHP's time limit, bounds it.
+        // A reply can take a long time (tool calls, workflows). We turn off PHP's own time
+        // limit and use the `widget.max_reply_seconds` setting as the limit instead.
         @set_time_limit(0);
         ignore_user_abort(false);
+
+        $maxSeconds = max(0, (int) config('gaith-chatbot.widget.max_reply_seconds', 3600));
+        $startedAt = Carbon::now()->getTimestamp();
+        $renewedAt = $startedAt;
 
         try {
             foreach ($client->streamChat($user, $message, $options) as $event) {
@@ -424,6 +552,24 @@ final class GaithChatController extends Controller
                 if (connection_aborted()) {
                     return; // leaving the loop closes the upstream stream via the SDK's finally
                 }
+
+                // GAITH sends a small "still working" signal about every 15 seconds, so we get
+                // here regularly even while a long tool call is running. That is when we check
+                // the time limit and renew this reply's place in the per-user limit.
+                $now = Carbon::now()->getTimestamp();
+                if ($maxSeconds > 0 && $now - $startedAt >= $maxSeconds) {
+                    Log::warning('GAITH chat turn stopped at the reply time limit', [
+                        'trace_id' => $this->traceId,
+                        'max_reply_seconds' => $maxSeconds,
+                    ]);
+                    $this->emit('error', ['code' => 'reply_timeout', 'message' => 'The assistant took too long to reply.']);
+
+                    return;
+                }
+                if ($now - $renewedAt >= self::STREAM_SLOT_RENEW_SECONDS) {
+                    Cache::put($slot, $this->traceId, self::STREAM_SLOT_SECONDS);
+                    $renewedAt = $now;
+                }
             }
         } catch (StreamDroppedException $e) {
             $this->fail('stream_dropped', $e);
@@ -436,16 +582,65 @@ final class GaithChatController extends Controller
         }
     }
 
+    /**
+     * Takes one of the user's places for a running reply.
+     *
+     * While a reply is being written, it keeps one of the product server's PHP workers busy.
+     * So one user may only have `widget.max_streams_per_user` replies running at the same time
+     * (2 by default); other users are not affected.
+     *
+     * Each place is a cache entry that expires after a minute unless the reply renews it. If a
+     * PHP worker crashes in the middle of a reply, its place frees itself within a minute,
+     * instead of blocking the user until the reply time limit.
+     *
+     * @return string|null the cache key of the place, or null when all places are taken
+     */
+    private function takeStreamSlot(GaithUser $user): ?string
+    {
+        $max = max(1, (int) config('gaith-chatbot.widget.max_streams_per_user', 2));
+        for ($i = 0; $i < $max; $i++) {
+            $key = 'gaith-chat:stream:' . $user->id() . ':' . $i;
+            // add() only succeeds if nobody holds this place yet, so two requests can never
+            // take the same place at the same moment.
+            if (Cache::add($key, $this->traceId, self::STREAM_SLOT_SECONDS)) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    private function releaseStreamSlot(string $key): void
+    {
+        // Free the place only if it is still ours. If it expired, another reply may hold it now.
+        if (Cache::get($key) === $this->traceId) {
+            Cache::forget($key);
+        }
+    }
+
     private function userOrAbort(Request $request): GaithUser
     {
-        $id = $this->users->resolve($request);
-        if ($id === null || $id === '') {
+        $user = $this->users->resolve($request);
+        if ($user === null) {
             // This value partitions conversation history inside GAITH, so an
             // unidentified caller is refused rather than given an id of its own.
             abort(401);
         }
 
-        return GaithUser::for($id);
+        // Load the proof signer now, before anything is sent. If the proof settings are missing,
+        // the request stops here with an error, instead of reaching GAITH without a proof.
+        $signer = $this->app->make(ProofSigner::class);
+
+        // Make a new trace id for this request. We never take one from the browser, so a
+        // user cannot put their own text into our logs or GAITH's.
+        $this->traceId = Uuid::uuid4()->toString();
+        $this->productUser = $user;
+
+        return GaithUser::for($user->externalUserId())
+            ->withTraceId($this->traceId)
+            ->withProof(function (string $chatbotId) use ($signer, $user): string {
+                return $signer->sign($user, $chatbotId);
+            });
     }
 
     private function client(): GaithChatbotClient
@@ -472,6 +667,7 @@ final class GaithChatController extends Controller
     {
         Log::error('GAITH chat widget request failed', [
             'code' => $code,
+            'trace_id' => $this->traceId,
             'exception' => get_class($e),
             'message' => $e->getMessage(),
         ]);
