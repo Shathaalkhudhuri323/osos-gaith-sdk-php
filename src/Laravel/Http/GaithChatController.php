@@ -19,6 +19,7 @@ use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
 use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\GaithChatbotClient;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotClientFactory;
+use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 use Osos\Gaith\Sdk\Models\FileRef;
 use Osos\Gaith\Sdk\Models\MessagePageOptions;
 use Osos\Gaith\Sdk\Streaming\ChatEvent;
@@ -58,10 +59,10 @@ final class GaithChatController extends Controller
     /** @var Container */
     private $app;
 
-    /** @var GaithUserResolver */
+    /** @var ProductUserResolver */
     private $users;
 
-    public function __construct(Container $app, GaithUserResolver $users)
+    public function __construct(Container $app, ProductUserResolver $users)
     {
         $this->app = $app;
         $this->users = $users;
@@ -438,14 +439,14 @@ final class GaithChatController extends Controller
 
     private function userOrAbort(Request $request): GaithUser
     {
-        $id = $this->users->resolve($request);
-        if ($id === null || $id === '') {
+        $user = $this->users->resolve($request);
+        if ($user === null) {
             // This value partitions conversation history inside GAITH, so an
             // unidentified caller is refused rather than given an id of its own.
             abort(401);
         }
 
-        return GaithUser::for($id);
+        return GaithUser::for($user->externalUserId());
     }
 
     private function client(): GaithChatbotClient

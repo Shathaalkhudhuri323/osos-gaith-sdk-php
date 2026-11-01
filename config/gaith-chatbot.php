@@ -13,6 +13,50 @@ return [
     ],
 
     /*
+     * Who is chatting, read from the host's signed-in user on the server. Product,
+     * customer and person become the GAITH user id (qhse:7:42), so histories of
+     * different customers or products never mix. Never point these at anything the
+     * browser sends.
+     *
+     * customer / person sources:
+     *   user:<path>   attribute of the signed-in user, dots follow relations
+     *   config:<key>  config value the host sets server-side (e.g. its tenant middleware)
+     *   value:<text>  fixed value, for a deployment with one customer
+     * person left empty = the signed-in user's id.
+     *
+     *   QHSE: product qhse, customer user:employee.centralDBCompanyID,
+     *         person user:employee.employeeSystemID (the same ids the QHSE MCP uses)
+     *   ERP:  product erp, customer config:database.connections.mysql.database
+     *         (the tenant database its tenant middleware selects), person empty
+     */
+    'identity' => [
+        'product' => env('GAITH_IDENTITY_PRODUCT'),
+        'customer' => env('GAITH_IDENTITY_CUSTOMER'),
+        'person' => env('GAITH_IDENTITY_PERSON'),
+
+        // A product whose ids cannot be described above names its own class here. Must
+        // implement Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver. A class name,
+        // not a closure, so `php artisan config:cache` keeps working.
+        'resolver' => \Osos\Gaith\Sdk\Laravel\Identity\ConfiguredProductUserResolver::class,
+    ],
+
+    /*
+     * Key for the identity proof: a short-lived RS256 JWT, signed here and sent to GAITH
+     * with every chat request, saying which user (identity above) is chatting. GAITH
+     * checks it with the public half registered on the chatbot's API key.
+     *
+     * One key pair per environment. The private key belongs in the host's secret store,
+     * never in Git, email or chat. Give it either as PEM text (newlines may be written
+     * as \n in .env) or as a path to a PEM file, not both.
+     */
+    'proof' => [
+        // The id GAITH has this key's public half registered under, e.g. qhse-prod-1.
+        'key_id' => env('GAITH_PROOF_KEY_ID'),
+        'private_key' => env('GAITH_PROOF_PRIVATE_KEY'),
+        'private_key_path' => env('GAITH_PROOF_PRIVATE_KEY_PATH'),
+    ],
+
+    /*
      * Ready-made routes for the <gaith-chat> browser widget. Off by default: turning
      * them on exposes endpoints, so the host must first decide which auth middleware
      * guards them.
@@ -28,15 +72,6 @@ return [
 
         // Connection under `connections` the widget talks to; null uses `default`.
         'connection' => env('GAITH_CHAT_WIDGET_CONNECTION'),
-
-        // Turns the host's signed-in user into the GAITH external_user_id. Must
-        // implement Osos\Gaith\Sdk\Laravel\Http\GaithUserResolver. A class name,
-        // not a closure, so `php artisan config:cache` keeps working.
-        'user_resolver' => \Osos\Gaith\Sdk\Laravel\Http\AuthGaithUserResolver::class,
-
-        // Prepended to the host user id so ids from different apps sharing one
-        // chatbot can never collide (e.g. 'erp-user-', 'qhse-user-').
-        'user_prefix' => env('GAITH_CHAT_WIDGET_USER_PREFIX', 'user-'),
 
         // Widget colours per product, served to the browser by {prefix}/config.
         // Any CSS colour: #hex, rgb()/rgba(), hsl()/hsla() or a named colour.

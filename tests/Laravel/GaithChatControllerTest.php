@@ -45,7 +45,8 @@ final class GaithChatControllerTest extends TestCase
         $app['config']->set('gaith-chatbot.widget.enabled', true);
         $app['config']->set('gaith-chatbot.widget.prefix', 'api/gaith');
         $app['config']->set('gaith-chatbot.widget.middleware', ['auth']);
-        $app['config']->set('gaith-chatbot.widget.user_prefix', 'erp-user-');
+        $app['config']->set('gaith-chatbot.identity.product', 'erp');
+        $app['config']->set('gaith-chatbot.identity.customer', 'value:acme');
     }
 
     private function signIn(int $id = 42): void
@@ -101,7 +102,7 @@ final class GaithChatControllerTest extends TestCase
             'external_user_id' => 'someone-else',
         ])->streamedContent();
 
-        $this->assertSame('erp-user-42', $this->sentChatBody['external_user_id']);
+        $this->assertSame('erp:acme:42', $this->sentChatBody['external_user_id']);
         $this->assertSame('hello', $this->sentChatBody['message']);
         $this->assertSame('c1', $this->sentChatBody['conversation_id']);
     }
@@ -189,7 +190,7 @@ final class GaithChatControllerTest extends TestCase
         $this->assertStringNotContainsString('after_seq', $this->sentQueries[0]);
         $this->assertStringContainsString('after_seq=2', $this->sentQueries[1]);
         $this->assertStringContainsString('after_seq=3', $this->sentQueries[2]);
-        $this->assertStringContainsString('external_user_id=erp-user-42', $this->sentQueries[0]);
+        $this->assertStringContainsString('external_user_id=erp%3Aacme%3A42', $this->sentQueries[0]);
     }
 
     public function testHistoryIsCappedSoOneLongConversationCannotHoldTheWorker(): void
@@ -309,7 +310,7 @@ final class GaithChatControllerTest extends TestCase
         // GAITH's download_url needs the API key; the widget must use our file route.
         $this->signIn();
         $this->bindStreaming([
-            "event: file\ndata: {\"artifact_id\":\"6910c7b6-6e62-4498-b880-611d2b159ba9\",\"filename\":\"onboarding-checklist.pdf\",\"media_type\":\"application/pdf\",\"size_bytes\":36979,\"download_url\":\"/api/v1/chatbots/x/attachments/6910c7b6?external_user_id=erp-user-42\"}\n\n",
+            "event: file\ndata: {\"artifact_id\":\"6910c7b6-6e62-4498-b880-611d2b159ba9\",\"filename\":\"onboarding-checklist.pdf\",\"media_type\":\"application/pdf\",\"size_bytes\":36979,\"download_url\":\"/api/v1/chatbots/x/attachments/6910c7b6?external_user_id=erp%3Aacme%3A42\"}\n\n",
             "event: done\ndata: {\"message_id\":\"m1\",\"conversation_id\":\"c1\",\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\n",
         ]);
 
@@ -340,7 +341,7 @@ final class GaithChatControllerTest extends TestCase
         $response->assertHeader('X-Content-Type-Options', 'nosniff');
         $this->assertStringNotContainsString('sandbox', $response->headers->get('Content-Security-Policy'));
         $this->assertSame('attachments/6910c7b6-6e62-4498-b880-611d2b159ba9', $this->sentFilePath);
-        $this->assertSame('external_user_id=erp-user-42', $this->sentQueries[0]);
+        $this->assertSame('external_user_id=erp%3Aacme%3A42', $this->sentQueries[0]);
     }
 
     public function testFileRouteTreatsArtifactIdsAsOpaqueValues(): void
@@ -575,7 +576,7 @@ final class GaithChatControllerTest extends TestCase
         ]);
         [$name, $user, $type] = $this->sentUploads[0];
         $this->assertSame('site photo.jpg', $name);
-        $this->assertSame('erp-user-42', $user);
+        $this->assertSame('erp:acme:42', $user);
         $this->assertSame('image/jpeg', $type);
     }
 

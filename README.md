@@ -101,8 +101,8 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
 2. `php artisan vendor:publish --tag=gaith-chatbot-config` and in `config/gaith-chatbot.php` set
    `widget.middleware` to **your app's auth stack**. Example for the ERP:
    `['api', 'auth.api.keycloak', 'request.signature']`.
-3. Set `GAITH_CHAT_WIDGET_ENABLED=true`, `GAITH_CHAT_WIDGET_PREFIX=api/v1/gaith` and
-   `GAITH_CHAT_WIDGET_USER_PREFIX=erp-user-` (a unique prefix per product).
+3. Set `GAITH_CHAT_WIDGET_ENABLED=true`, `GAITH_CHAT_WIDGET_PREFIX=api/v1/gaith`, and tell the SDK
+   who the signed-in user is (see *Who is chatting* below).
 4. `php artisan vendor:publish --tag=gaith-chat-assets` copies the widget to
    `public/vendor/gaith-chat/gaith-chat.js`. Re-run it after every SDK update so widget and routes match.
 
@@ -150,8 +150,37 @@ Images (PNG/JPEG/GIF/WebP) show inline; PDFs open in a new tab; other types down
 back with the history (GAITH keeps them 30 days, then they show as expired). The browser never sees
 GAITH's download URL: every file goes through `{prefix}/files/…` with the host's own auth.
 
-The user is resolved server-side from `$request->user()`. To map users differently, bind your own
-`Osos\Gaith\Sdk\Laravel\Http\GaithUserResolver` or set `widget.user_resolver`.
+**Who is chatting:** the SDK reads the product, the customer and the person from the signed-in user
+on the server, and joins them into the GAITH user id (`qhse:7:42`). Customers and products therefore
+never share a chat history, even when two customers have an employee with the same number. Nothing
+the browser sends (a `selectedCompany` header, a body field) is ever used.
+
+| Setting | QHSE | ERP |
+|---|---|---|
+| `GAITH_IDENTITY_PRODUCT` | `qhse` | `erp` |
+| `GAITH_IDENTITY_CUSTOMER` | `user:employee.centralDBCompanyID` | `config:database.connections.mysql.database` |
+| `GAITH_IDENTITY_PERSON` | `user:employee.employeeSystemID` | *(empty: the user's id)* |
+
+`user:<path>` reads the signed-in user (dots follow relations), `config:<key>` a config value the host
+sets on the server (the ERP's tenant middleware selects the tenant database), `value:<text>` a fixed
+value for a one-customer deployment. A user the settings cannot identify (say, a QHSE user with no
+employee record) gets a 401; a missing or malformed setting is an error, not a 401 for everyone. A
+product whose ids do not fit these sources names its own `Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver`
+in `identity.resolver`.
+
+**Identity proof key:** with every chat request the SDK will send GAITH a signed proof of who is
+chatting: an RS256 JWT with `iss` (product), `sub` (person), `tenant` (customer), `aud` (chatbot id),
+`iat`, `exp` (2 minutes) and a one-use `jti`. Make one key pair per environment:
+
+```bash
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out gaith-proof.pem
+openssl pkey -in gaith-proof.pem -pubout -out gaith-proof.pub.pem
+```
+
+The private key goes into the host's secret store, never into Git, email or chat; set
+`GAITH_PROOF_PRIVATE_KEY_PATH` to its file (or `GAITH_PROOF_PRIVATE_KEY` to its text, newlines as `\n`)
+and `GAITH_PROOF_KEY_ID` to a name such as `qhse-prod-1`. The public key and that name are registered
+on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default).
 
 **Behind nginx:** responses already send `X-Accel-Buffering: no`. Make sure no other proxy buffers or
 times out `text/event-stream` responses. Heartbeats are relayed every ~15s.

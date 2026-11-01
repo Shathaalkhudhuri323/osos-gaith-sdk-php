@@ -4,8 +4,10 @@ namespace Osos\Gaith\Sdk\Laravel;
 
 use Illuminate\Support\ServiceProvider;
 use Osos\Gaith\Sdk\GaithChatbotClient;
-use Osos\Gaith\Sdk\Laravel\Http\AuthGaithUserResolver;
-use Osos\Gaith\Sdk\Laravel\Http\GaithUserResolver;
+use Osos\Gaith\Sdk\Identity\ProofSigner;
+use Osos\Gaith\Sdk\Laravel\Identity\ConfiguredProductUserResolver;
+use Osos\Gaith\Sdk\Laravel\Identity\ProofSignerFactory;
+use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 
 final class GaithChatbotServiceProvider extends ServiceProvider
 {
@@ -23,8 +25,13 @@ final class GaithChatbotServiceProvider extends ServiceProvider
             return $app->make(GaithChatbotClientFactory::class)->get($default);
         });
 
-        $this->app->bind(GaithUserResolver::class, function ($app) {
-            return $app->make($app['config']->get('gaith-chatbot.widget.user_resolver', AuthGaithUserResolver::class));
+        $this->app->bind(ProductUserResolver::class, function ($app) {
+            return $app->make($app['config']->get('gaith-chatbot.identity.resolver', ConfiguredProductUserResolver::class));
+        });
+
+        // Lazy, so a host that has not set its key yet only fails where a proof is needed.
+        $this->app->singleton(ProofSigner::class, function ($app) {
+            return ProofSignerFactory::make((array) $app['config']->get('gaith-chatbot.proof', []));
         });
     }
 
