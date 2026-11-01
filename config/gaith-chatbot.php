@@ -121,5 +121,10 @@ return [
         // Upper bound on history loaded after a page reload, so one very long
         // conversation cannot hold a PHP worker for many sequential GAITH calls.
         'history_max_messages' => 500,
+
+        // How long {prefix}/status keeps GAITH's on/off answer per customer, in seconds, so
+        // page loads do not each call GAITH. Also the longest a switch-off takes to show.
+        // 0 asks GAITH on every page load. Failures are kept for at most 10 s.
+        'status_cache_seconds' => (int) env('GAITH_CHAT_WIDGET_STATUS_CACHE_SECONDS', 60),
     ],
 ];

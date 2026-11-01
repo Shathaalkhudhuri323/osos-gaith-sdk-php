@@ -18,6 +18,7 @@ use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
 use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
 use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\GaithChatbotClient;
+use Osos\Gaith\Sdk\Identity\ProductUser;
 use Osos\Gaith\Sdk\Identity\ProofSigner;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotClientFactory;
 use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
@@ -37,6 +38,7 @@ use Osos\Gaith\Sdk\Streaming\TokenEvent;
 use Osos\Gaith\Sdk\Streaming\ToolCallEvent;
 use Osos\Gaith\Sdk\Streaming\ToolResultEvent;
 use Psr\Http\Client\ClientExceptionInterface;
+use Ramsey\Uuid\Uuid;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -63,6 +65,15 @@ final class GaithChatController extends Controller
 
     /** @var ProductUserResolver */
     private $users;
+
+    /** @var string|null this request's trace id, once the user is identified */
+    private $traceId;
+
+    /** @var ProductUser|null this request's user, once identified */
+    private $productUser;
+
+    /** How long a failed status check is remembered, whatever the normal cache time. */
+    private const STATUS_FAILURE_CACHE_SECONDS = 10;
 
     public function __construct(Container $app, ProductUserResolver $users)
     {
@@ -337,6 +348,11 @@ final class GaithChatController extends Controller
         // Tells nginx not to buffer the response into a single blob, which would
         // defeat streaming without producing any error.
         $response->headers->set('X-Accel-Buffering', 'no');
+        // The id to quote to support; the same one is in GAITH's logs for this turn.
+        $response->headers->set(GaithUser::TRACE_HEADER, (string) $user->traceId());
+
+        // Only the id: the message, the user and the proof stay out of the log.
+        Log::info('GAITH chat turn started', ['trace_id' => $user->traceId()]);
 
         return $response;
     }
@@ -348,16 +364,37 @@ final class GaithChatController extends Controller
      * Anything short of GAITH's clear yes - a refusal, an error, GAITH out of reach -
      * answers off: the chat could not work then anyway, and a hidden chat box is the
      * safe way to be wrong. Failures are logged so an admin can see why it is hidden.
+     *
+     * Every page load asks, so GAITH's answer is cached per chatbot and customer (the
+     * switch is per customer, not per person): `widget.status_cache_seconds`, 60 by
+     * default, which is also how long a switch-off can take. A failure is kept for
+     * only a few seconds, so an outage does not turn every page load into a call that
+     * will fail, nor hide the chat box long after GAITH is back.
      */
     public function status(Request $request): JsonResponse
     {
         $user = $this->userOrAbort($request);
+        $client = $this->client();
 
-        try {
-            $enabled = $this->client()->isEnabledFor($user);
-        } catch (GaithApiException | ClientExceptionInterface $e) {
-            $this->logFailure('status_failed', $e);
-            $enabled = false;
+        $ttl = max(0, (int) config('gaith-chatbot.widget.status_cache_seconds', 60));
+        $key = 'gaith-chat:status:' . $client->chatbotId() . ':' . $this->productUser->product()
+            . ':' . $this->productUser->customer();
+        $cached = $ttl > 0 ? Cache::get($key) : null;
+
+        if (is_bool($cached)) {
+            $enabled = $cached;
+        } else {
+            try {
+                $enabled = $client->isEnabledFor($user);
+                $keepFor = $ttl;
+            } catch (GaithApiException | ClientExceptionInterface $e) {
+                $this->logFailure('status_failed', $e);
+                $enabled = false;
+                $keepFor = min($ttl, self::STATUS_FAILURE_CACHE_SECONDS);
+            }
+            if ($keepFor > 0) {
+                Cache::put($key, $enabled, $keepFor);
+            }
         }
 
         $response = new JsonResponse(['enabled' => $enabled]);
@@ -478,11 +515,16 @@ final class GaithChatController extends Controller
         // proof settings stop the request here instead of reaching GAITH without a proof.
         $signer = $this->app->make(ProofSigner::class);
 
-        return GaithUser::for($user->externalUserId())->withProof(
-            function (string $chatbotId) use ($signer, $user): string {
+        // One id per browser request, made here and never taken from the browser, so
+        // nothing a user sends ends up in GAITH's or this host's logs as an id.
+        $this->traceId = Uuid::uuid4()->toString();
+        $this->productUser = $user;
+
+        return GaithUser::for($user->externalUserId())
+            ->withTraceId($this->traceId)
+            ->withProof(function (string $chatbotId) use ($signer, $user): string {
                 return $signer->sign($user, $chatbotId);
-            }
-        );
+            });
     }
 
     private function client(): GaithChatbotClient
@@ -509,6 +551,7 @@ final class GaithChatController extends Controller
     {
         Log::error('GAITH chat widget request failed', [
             'code' => $code,
+            'trace_id' => $this->traceId,
             'exception' => get_class($e),
             'message' => $e->getMessage(),
         ]);

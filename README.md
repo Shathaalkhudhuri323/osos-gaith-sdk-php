@@ -135,7 +135,7 @@ This registers six routes:
 | Route | Purpose |
 |---|---|
 | `GET {prefix}/config` | Per-product settings (colours, allowed image origins, attachment limits) |
-| `GET {prefix}/status` | `{enabled}`: is the chatbot switched on for this user's customer? Asks GAITH (`GET access`); anything but a clear yes is `false` |
+| `GET {prefix}/status` | `{enabled}`: is the chatbot switched on for this user's customer? Asks GAITH (`GET access`), cached per customer for `GAITH_CHAT_WIDGET_STATUS_CACHE_SECONDS` (60; failures 10 s); anything but a clear yes is `false` |
 | `POST {prefix}/attachments` (multipart `file`) | Uploads one attached file to GAITH, returns its `artifact_id` |
 | `POST {prefix}/stream` `{message, conversation_id?, attachments?}` | One chat turn, streamed back as SSE |
 | `GET {prefix}/conversations/{id}/messages` | History, including each message's files |
@@ -183,6 +183,12 @@ The private key goes into the host's secret store, never into Git, email or chat
 and `GAITH_PROOF_KEY_ID` to a name such as `qhse-prod-1`. The public key and that name are registered
 on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default). Without a key
 the widget routes answer 500 and send nothing to GAITH, rather than chat without a proof.
+
+**Trace id:** each browser request gets one id, made on the server (never taken from the browser).
+It goes to GAITH as `X-Trace-ID` on every call for that request (a resumed stream keeps it), into
+this app's log (`GAITH chat turn started` and every failure, as `trace_id`), and back to the browser
+in the chat response's `X-Trace-ID` header, for users to quote to support. Messages, proofs and
+tokens are never logged.
 
 **Behind nginx:** responses already send `X-Accel-Buffering: no`. Make sure no other proxy buffers or
 times out `text/event-stream` responses. Heartbeats are relayed every ~15s.

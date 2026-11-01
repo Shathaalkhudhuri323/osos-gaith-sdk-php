@@ -7,11 +7,17 @@ final class GaithUser
     /** The header GAITH reads the signed identity proof from. */
     public const PROOF_HEADER = 'X-Gaith-Identity-Proof';
 
+    /** The header GAITH takes a caller's trace id from (app/main.py). */
+    public const TRACE_HEADER = 'X-Trace-ID';
+
     /** @var string */
     private $id;
 
     /** @var callable|null fn(string $chatbotId): string, one fresh proof per call */
     private $proof;
+
+    /** @var string|null */
+    private $traceId;
 
     private function __construct(string $id)
     {
@@ -53,14 +59,37 @@ final class GaithUser
     }
 
     /**
-     * @return array<string, string> the proof header for one request to $chatbotId, or none
+     * Sends this trace id with every request made for this user, so one chat turn can
+     * be followed through the host's, GAITH's and the MCP's logs. GAITH reads it as
+     * X-Trace-ID. Unlike the proof it stays the same across a resumed stream.
      */
-    public function proofHeaders(string $chatbotId): array
+    public function withTraceId(string $traceId): self
     {
-        if ($this->proof === null) {
-            return [];
+        $copy = clone $this;
+        $copy->traceId = $traceId;
+
+        return $copy;
+    }
+
+    public function traceId(): ?string
+    {
+        return $this->traceId;
+    }
+
+    /**
+     * @return array<string, string> headers for one request to $chatbotId: a fresh proof
+     *                               and the trace id, each only when set
+     */
+    public function requestHeaders(string $chatbotId): array
+    {
+        $headers = [];
+        if ($this->proof !== null) {
+            $headers[self::PROOF_HEADER] = ($this->proof)($chatbotId);
+        }
+        if ($this->traceId !== null) {
+            $headers[self::TRACE_HEADER] = $this->traceId;
         }
 
-        return [self::PROOF_HEADER => ($this->proof)($chatbotId)];
+        return $headers;
     }
 }

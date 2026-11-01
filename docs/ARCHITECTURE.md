@@ -331,6 +331,9 @@ That pairing is the main reason both halves live in this repo rather than an npm
   dumps, and setting errors name the setting, never the key. The widget routes attach it per HTTP
   request in `X-Gaith-Identity-Proof` (`GaithUser::withProof`), so a resumed stream or each history
   page gets its own `jti`, and its audience is the chatbot of the client actually sending it.
+- **One trace id per browser request**, server-made, sent as `X-Trace-ID` (the header GAITH already
+  reads into its trace context) on every GAITH call for that request, logged here and returned to
+  the browser. Unlike the proof it survives a resumed stream: one turn, one id.
 - **Routes are off by default** (`widget.enabled`). Enabling them is a security decision: the host must
   first put its own auth middleware in `widget.middleware`.
 - **Web Component, prebuilt ES2017 bundle.** Both target apps run Angular 5 / TypeScript 2.9, which

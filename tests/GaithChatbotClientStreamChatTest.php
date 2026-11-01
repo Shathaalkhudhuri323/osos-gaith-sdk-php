@@ -147,7 +147,7 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         $user = GaithUser::for('qhse:7:42')->withProof(function (string $chatbotId) use (&$minted, &$audiences) {
             $audiences[] = $chatbotId;
             return 'proof-' . (++$minted);
-        });
+        })->withTraceId('trace-1');
 
         iterator_to_array((new GaithChatbotClient($transport, $streamingClient))->streamChat($user, 'hello'));
 
@@ -155,6 +155,9 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         $this->assertSame('proof-1', $capturedRequests[0]->getHeaderLine(GaithUser::PROOF_HEADER));
         $this->assertSame('proof-2', $capturedRequests[1]->getHeaderLine(GaithUser::PROOF_HEADER));
         $this->assertSame(['11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111'], $audiences);
+        // One turn, one trace id, even across the reconnect.
+        $this->assertSame('trace-1', $capturedRequests[0]->getHeaderLine(GaithUser::TRACE_HEADER));
+        $this->assertSame('trace-1', $capturedRequests[1]->getHeaderLine(GaithUser::TRACE_HEADER));
     }
 
     public function testAUserWithoutAProofSendsNoProofHeader(): void
@@ -174,6 +177,7 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         iterator_to_array((new GaithChatbotClient($transport, $streamingClient))->streamChat(GaithUser::for('user-1'), 'hello'));
 
         $this->assertFalse($captured->hasHeader(GaithUser::PROOF_HEADER));
+        $this->assertFalse($captured->hasHeader(GaithUser::TRACE_HEADER));
     }
 
     public function testDropBeforeMetaEventPropagatesWithoutResume(): void

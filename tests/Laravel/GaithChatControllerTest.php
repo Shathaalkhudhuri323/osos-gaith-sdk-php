@@ -5,6 +5,7 @@ namespace Osos\Gaith\Sdk\Tests\Laravel;
 use GuzzleHttp\Psr7\Request;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Osos\Gaith\Sdk\Config\GaithUser;
 use Osos\Gaith\Sdk\Exceptions\GaithAuthException;
 use Osos\Gaith\Sdk\Exceptions\GaithForbiddenException;
@@ -79,10 +80,77 @@ final class GaithChatControllerTest extends TestCase
         return $transport;
     }
 
+    /** @var array<int, string|null> trace id header of each outgoing request, in order */
+    private $sentTraceIds = [];
+
     /** @param array<string, string> $headers */
     private function recordProof(array $headers): void
     {
         $this->sentProofs[] = $headers[GaithUser::PROOF_HEADER] ?? null;
+        $this->sentTraceIds[] = $headers[GaithUser::TRACE_HEADER] ?? null;
+    }
+
+    public function testAChatTurnSendsGaithATraceIdAndHandsTheSameOneToTheBrowser(): void
+    {
+        Log::spy();
+        $this->signIn(42);
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+
+        $response = $this->post('/api/gaith/stream', ['message' => 'hello']);
+        $response->streamedContent();
+
+        $traceId = $response->headers->get('X-Trace-ID');
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', (string) $traceId);
+        $this->assertSame([$traceId], $this->sentTraceIds);
+        Log::shouldHaveReceived('info')->with('GAITH chat turn started', ['trace_id' => $traceId])->once();
+    }
+
+    public function testEachBrowserRequestGetsItsOwnTraceIdAndTheBrowserCannotSetIt(): void
+    {
+        $this->signIn(42);
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+        $first = $this->post('/api/gaith/stream', ['message' => 'one'], ['X-Trace-ID' => "evil\nforged"]);
+        $first->streamedContent();
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+        $second = $this->post('/api/gaith/stream', ['message' => 'two']);
+        $second->streamedContent();
+
+        $this->assertNotSame("evil\nforged", $first->headers->get('X-Trace-ID'));
+        $this->assertNotContains("evil\nforged", $this->sentTraceIds);
+        $this->assertNotSame($first->headers->get('X-Trace-ID'), $second->headers->get('X-Trace-ID'));
+    }
+
+    public function testAllGaithCallsForOneRequestShareItsTraceId(): void
+    {
+        $this->signIn(42);
+        $page = 0;
+        $this->bindJson(function () use (&$page) {
+            return ++$page <= 2 ? [$this->messageRow('user', 'hi', $page)] : [];
+        });
+
+        $this->get('/api/gaith/conversations/c1/messages')->assertStatus(200);
+
+        $this->assertCount(3, $this->sentTraceIds);
+        $this->assertCount(1, array_unique($this->sentTraceIds));
+        $this->assertNotNull($this->sentTraceIds[0]);
+    }
+
+    public function testAFailureIsLoggedWithTheTraceIdAndWithoutTheProof(): void
+    {
+        Log::spy();
+        $this->signIn(42);
+        $this->bindJson(function () {
+            throw new GaithAuthException(401, 'invalid_proof', 'Invalid proof', '{}');
+        });
+
+        $this->get('/api/gaith/status')->assertStatus(200);
+
+        Log::shouldHaveReceived('error')->withArgs(function (string $message, array $context) {
+            $this->assertSame('status_failed', $context['code']);
+            $this->assertSame($this->sentTraceIds[0], $context['trace_id']);
+            $this->assertStringNotContainsString((string) $this->sentProofs[0], json_encode($context));
+            return true;
+        })->once();
     }
 
     /**
@@ -203,6 +271,81 @@ final class GaithChatControllerTest extends TestCase
                 throw new \GuzzleHttp\Exception\ConnectException('connection refused', new Request('GET', 'https://gaith.invalid/access'));
             }],
         ];
+    }
+
+    public function testStatusAsksGaithOncePerCustomerWithinTheCacheTime(): void
+    {
+        $this->bindJson(function () { return ['enabled' => true]; });
+
+        foreach ([42, 43, 44] as $person) { // three people at the same customer
+            $this->signIn($person);
+            $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+        }
+
+        $this->assertCount(1, $this->sentProofs);
+    }
+
+    public function testEachCustomerGetsItsOwnAnswer(): void
+    {
+        $this->app['config']->set('gaith-chatbot.identity.customer', 'user:company');
+        $this->bindJson(function () {
+            return ['enabled' => count($this->sentProofs) === 1]; // first customer on, second off
+        });
+
+        $this->actingAs(new GenericUser(['id' => 42, 'company' => 'acme']));
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+        $this->actingAs(new GenericUser(['id' => 42, 'company' => 'globex']));
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => false]);
+        $this->actingAs(new GenericUser(['id' => 7, 'company' => 'acme']));
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+
+        $this->assertCount(2, $this->sentProofs);
+    }
+
+    public function testASwitchOffShowsOnceTheCacheTimePasses(): void
+    {
+        $answers = [true, false];
+        $this->bindJson(function () use (&$answers) { return ['enabled' => array_shift($answers)]; });
+        $this->signIn(42);
+
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+        $this->travel(59)->seconds();
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+        $this->travel(2)->seconds();
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => false]);
+
+        $this->assertCount(2, $this->sentProofs);
+    }
+
+    public function testAFailureIsRememberedOnlyBriefly(): void
+    {
+        $calls = 0;
+        $this->bindJson(function () use (&$calls) {
+            if (++$calls === 1) {
+                throw new \GuzzleHttp\Exception\ConnectException('connection refused', new Request('GET', 'https://gaith.invalid/access'));
+            }
+            return ['enabled' => true];
+        });
+        $this->signIn(42);
+
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => false]);
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => false]); // not retried at once
+        $this->travel(11)->seconds();
+        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
+
+        $this->assertSame(2, $calls);
+    }
+
+    public function testACacheTimeOfZeroAsksGaithEveryTime(): void
+    {
+        $this->app['config']->set('gaith-chatbot.widget.status_cache_seconds', 0);
+        $this->bindJson(function () { return ['enabled' => true]; });
+        $this->signIn(42);
+
+        $this->get('/api/gaith/status');
+        $this->get('/api/gaith/status');
+
+        $this->assertCount(2, $this->sentProofs);
     }
 
     public function testStatusRefusesACallerItCannotIdentify(): void

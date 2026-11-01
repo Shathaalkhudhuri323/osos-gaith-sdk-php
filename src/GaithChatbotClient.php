@@ -38,6 +38,12 @@ final class GaithChatbotClient
         $this->sseReader = new SseReader();
     }
 
+    /** The chatbot this client talks to. */
+    public function chatbotId(): string
+    {
+        return $this->transport->chatbotId();
+    }
+
     public function getMeta(): ChatbotMeta
     {
         return ChatbotMeta::fromArray($this->transport->get('meta'));
@@ -50,7 +56,7 @@ final class GaithChatbotClient
      */
     public function isEnabledFor(GaithUser $user): bool
     {
-        $answer = $this->transport->get('access', '', $this->proof($user));
+        $answer = $this->transport->get('access', '', $this->headersFor($user));
 
         return ($answer['enabled'] ?? null) === true;
     }
@@ -68,7 +74,7 @@ final class GaithChatbotClient
             ->add('offset', $options->offset())
             ->toString();
 
-        $rows = $this->transport->get('conversations', $query, $this->proof($user));
+        $rows = $this->transport->get('conversations', $query, $this->headersFor($user));
 
         return array_map(static function (array $row): Conversation {
             return Conversation::fromArray($row);
@@ -79,7 +85,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        return Conversation::fromArray($this->transport->get('conversations/' . $conversationId, $query, $this->proof($user)));
+        return Conversation::fromArray($this->transport->get('conversations/' . $conversationId, $query, $this->headersFor($user)));
     }
 
     /**
@@ -93,7 +99,7 @@ final class GaithChatbotClient
             ->add('limit', $options->limit())
             ->toString();
 
-        $rows = $this->transport->get('conversations/' . $conversationId . '/messages', $query, $this->proof($user));
+        $rows = $this->transport->get('conversations/' . $conversationId . '/messages', $query, $this->headersFor($user));
 
         return array_map(static function (array $row): ChatMessage {
             return ChatMessage::fromArray($row);
@@ -104,7 +110,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        $this->transport->delete('conversations/' . $conversationId, $query, $this->proof($user));
+        $this->transport->delete('conversations/' . $conversationId, $query, $this->headersFor($user));
     }
 
     /**
@@ -127,7 +133,7 @@ final class GaithChatbotClient
             $filename ?? basename($filePath),
             $user->id(),
             $mediaType,
-            $this->proof($user)
+            $this->headersFor($user)
         );
 
         return AttachmentUpload::fromArray($result);
@@ -137,7 +143,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        return $this->transport->getRaw('attachments/' . $artifactId, $query, $this->proof($user));
+        return $this->transport->getRaw('attachments/' . $artifactId, $query, $this->headersFor($user));
     }
 
     /**
@@ -150,7 +156,7 @@ final class GaithChatbotClient
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
         return AttachmentDownload::fromResponse(
-            $this->transport->getRawResponse('attachments/' . rawurlencode($artifactId), $query, $this->proof($user))
+            $this->transport->getRawResponse('attachments/' . rawurlencode($artifactId), $query, $this->headersFor($user))
         );
     }
 
@@ -225,8 +231,8 @@ final class GaithChatbotClient
             'external_user_id' => $user->id(),
         ]);
 
-        // Built per attempt, so a resumed stream carries a fresh proof.
-        $headers = $this->proof($user);
+        // Built per attempt, so a resumed stream carries a fresh proof (and the same trace id).
+        $headers = $this->headersFor($user);
         if ($streamId !== null) {
             $headers['X-Stream-Id'] = $streamId;
             if ($lastEventId !== null) {
@@ -240,8 +246,8 @@ final class GaithChatbotClient
     /**
      * @return array<string, string>
      */
-    private function proof(GaithUser $user): array
+    private function headersFor(GaithUser $user): array
     {
-        return $user->proofHeaders($this->transport->chatbotId());
+        return $user->requestHeaders($this->transport->chatbotId());
     }
 }
