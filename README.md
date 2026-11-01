@@ -184,6 +184,9 @@ and `GAITH_PROOF_KEY_ID` to a name such as `qhse-prod-1`. The public key and tha
 on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default). Without a key
 the widget routes answer 500 and send nothing to GAITH, rather than chat without a proof.
 
+**Trying it without GAITH:** `examples/fake-gaith/` is a stand-in GAITH that checks every proof the way
+GAITH will and replies with who you are. Point `GAITH_CHATBOT_BASE_URL` at it; its README has the steps.
+
 **Trace id:** each browser request gets one id, made on the server (never taken from the browser).
 It goes to GAITH as `X-Trace-ID` on every call for that request (a resumed stream keeps it), into
 this app's log (`GAITH chat turn started` and every failure, as `trace_id`), and back to the browser
