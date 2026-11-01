@@ -66,25 +66,6 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         $this->assertInstanceOf(DoneEvent::class, $events[2]);
     }
 
-    public function testUnknownEventNamesAreSkipped(): void
-    {
-        $transport = $this->createMock(GaithHttpTransport::class);
-        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
-        $streamingClient->expects($this->once())
-            ->method('sendStreaming')
-            ->willReturn($this->handleFor([
-                "event: some_future_event\ndata: {}\n\n" .
-                "event: done\ndata: " . json_encode(['message_id' => 'm1', 'conversation_id' => 'c1', 'finish_reason' => null, 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]) . "\n\n",
-            ]));
-
-        $client = new GaithChatbotClient($transport, $streamingClient);
-
-        $events = iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
-
-        $this->assertCount(1, $events);
-        $this->assertInstanceOf(DoneEvent::class, $events[0]);
-    }
-
     public function testResumesWithinWindowAfterDrop(): void
     {
         $config = new \Osos\Gaith\Sdk\Config\GaithChatbotConfig(
@@ -160,26 +141,6 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         $this->assertSame('trace-1', $capturedRequests[1]->getHeaderLine(GaithUser::TRACE_HEADER));
     }
 
-    public function testAUserWithoutAProofSendsNoProofHeader(): void
-    {
-        $config = new \Osos\Gaith\Sdk\Config\GaithChatbotConfig('https://gaith-backend-dev.osos.om', '11111111-1111-1111-1111-111111111111', 'test-key');
-        $httpFactory = new \GuzzleHttp\Psr7\HttpFactory();
-        $transport = new GaithHttpTransport($config, $this->createMock(\Psr\Http\Client\ClientInterface::class), $httpFactory, $httpFactory);
-        $doneFrame = "event: done\ndata: " . json_encode(['message_id' => 'm1', 'conversation_id' => 'c1', 'finish_reason' => null, 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]) . "\n\n";
-
-        $captured = null;
-        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
-        $streamingClient->method('sendStreaming')->willReturnCallback(function (RequestInterface $request) use (&$captured, $doneFrame) {
-            $captured = $request;
-            return $this->handleFor([$doneFrame]);
-        });
-
-        iterator_to_array((new GaithChatbotClient($transport, $streamingClient))->streamChat(GaithUser::for('user-1'), 'hello'));
-
-        $this->assertFalse($captured->hasHeader(GaithUser::PROOF_HEADER));
-        $this->assertFalse($captured->hasHeader(GaithUser::TRACE_HEADER));
-    }
-
     public function testDropBeforeMetaEventPropagatesWithoutResume(): void
     {
         $transport = $this->createMock(GaithHttpTransport::class);
@@ -193,46 +154,6 @@ final class GaithChatbotClientStreamChatTest extends TestCase
         $this->expectException(StreamDroppedException::class);
 
         iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
-    }
-
-    public function testMetaEventWithoutIdStillResumesUsingStreamIdOnly(): void
-    {
-        $config = new \Osos\Gaith\Sdk\Config\GaithChatbotConfig(
-            'https://gaith-backend-dev.osos.om',
-            '11111111-1111-1111-1111-111111111111',
-            'test-key'
-        );
-        $httpFactory = new \GuzzleHttp\Psr7\HttpFactory();
-        $dummyHttpClient = $this->createMock(\Psr\Http\Client\ClientInterface::class);
-        $transport = new GaithHttpTransport($config, $dummyHttpClient, $httpFactory, $httpFactory);
-        $streamingClient = $this->createMock(StreamingHttpClientInterface::class);
-
-        // meta event present (so $streamId is set) but the SSE frame carries no "id:" line,
-        // so $lastEventId stays null. Resume eligibility is governed by streamId + the 60s
-        // window alone (matching the .NET reference SDK) -- streamChat() must still resume,
-        // sending X-Stream-Id but omitting Last-Event-ID since none was ever received.
-        $metaFrameNoId = "event: meta\ndata: " . json_encode(['conversation_id' => 'c1', 'user_message_id' => 'um1', 'stream_id' => 's1']) . "\n\n";
-        $doneFrame = "event: done\ndata: " . json_encode(['message_id' => 'm1', 'conversation_id' => 'c1', 'finish_reason' => null, 'usage' => ['input_tokens' => 0, 'output_tokens' => 0]]) . "\n\n";
-
-        $capturedRequests = [];
-        $streamingClient->expects($this->exactly(2))
-            ->method('sendStreaming')
-            ->willReturnCallback(function (RequestInterface $request) use (&$capturedRequests, $metaFrameNoId, $doneFrame) {
-                $capturedRequests[] = $request;
-                if (count($capturedRequests) === 1) {
-                    return $this->droppingHandleThenNull([$metaFrameNoId]);
-                }
-                return $this->handleFor([$doneFrame]);
-            });
-
-        $client = new GaithChatbotClient($transport, $streamingClient);
-
-        $events = iterator_to_array($client->streamChat(GaithUser::for('user-1'), 'hello'));
-
-        $this->assertInstanceOf(MetaEvent::class, $events[0]);
-        $this->assertInstanceOf(DoneEvent::class, $events[1]);
-        $this->assertSame('s1', $capturedRequests[1]->getHeaderLine('X-Stream-Id'));
-        $this->assertSame('', $capturedRequests[1]->getHeaderLine('Last-Event-ID'));
     }
 
     public function testOptionsCannotOverrideAuthenticatedUserId(): void

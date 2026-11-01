@@ -1,19 +1,20 @@
 <?php
 
 /**
- * A stand-in for GAITH's public chatbot API, so the SDK can be tried end to end before
- * GAITH accepts identity proofs (build plan Part A). Not GAITH, and not for production.
+ * A pretend GAITH, so the SDK can be tried from start to finish before the real GAITH
+ * accepts identity proofs. For local testing only, never for production.
  *
+ * Start it with:
  *   FAKE_GAITH_PUBLIC_KEY_PATH=gaith-proof.pub.pem php -S localhost:8787 examples/fake-gaith/server.php
+ * Then set the product's GAITH_CHATBOT_BASE_URL to http://localhost:8787 (README.md in this
+ * folder has all the steps).
  *
- * Then point a host at it: GAITH_CHATBOT_BASE_URL=http://localhost:8787, plus the chatbot
- * id and API key below. See README.md next to this file.
- *
- * It does what GAITH must do with an SDK request (steps 3.1 to 3.6): checks the API key,
- * checks the proof on every call, builds the user id from the proof and refuses a body
- * that claims someone else, and answers the on/off check from a customer list. Its
- * replies just say back who you are, which is the point: a wrong identity shows at once.
- * Every request is logged to the console with its X-Trace-ID.
+ * For every request it does what real GAITH will have to do:
+ *   - checks the API key and the identity proof
+ *   - takes the user from the proof, and refuses a request that names a different user
+ *   - answers "is the chatbot on?" from a list of switched-on customers
+ * Its replies simply repeat who you are, so a wrong identity is easy to spot.
+ * Every request is printed in the console with its trace id.
  */
 
 require_once __DIR__ . '/FakeGaithProofVerifier.php';
@@ -34,7 +35,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 $trace = $_SERVER['HTTP_X_TRACE_ID'] ?? '-';
 
 $log = static function (string $outcome, string $user = '-') use ($method, $path, $trace): void {
-    // The console of `php -S`; never the proof or the API key.
+    // Printed in the `php -S` console. The proof and the API key are never printed.
     error_log(sprintf('[fake-gaith] %s %s trace=%s user=%s %s', $method, $path, $trace, $user, $outcome));
 };
 
@@ -77,7 +78,7 @@ try {
     return $refuse(401, 'invalid_proof', $e->getMessage());
 }
 
-// Step 3.3: the user is whatever the proof says, never what the request says.
+// The user is whoever the proof says, never whoever the request body says (plan step 3.3).
 $user = $claims['iss'] . ':' . $claims['tenant'] . ':' . $claims['sub'];
 $isOn = $enabled === [] || in_array($claims['tenant'], $enabled, true);
 
@@ -125,7 +126,7 @@ if ($method === 'POST' && $route === 'chat') {
 
 if ($method === 'GET' && preg_match('#^conversations/[^/]+/messages$#', $route)) {
     $log('history (always empty)', $user);
-    return $json(200, []); // the fake keeps no history
+    return $json(200, []); // the fake GAITH does not keep chat history
 }
 
 if ($method === 'POST' && $route === 'attachments') {

@@ -47,7 +47,7 @@ class GaithHttpTransport
         return $this->config->baseUrl() . '/api/v1/chatbots/' . $this->config->chatbotId() . '/';
     }
 
-    /** The chatbot every request goes to, and so the audience of any identity proof sent with one. */
+    /** The chatbot all requests go to. A proof sent with a request must be made for this chatbot. */
     public function chatbotId(): string
     {
         return $this->config->chatbotId();

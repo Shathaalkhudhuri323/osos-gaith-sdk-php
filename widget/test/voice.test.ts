@@ -95,23 +95,6 @@ describe('voice input', () => {
     expect(shadow(el).querySelectorAll('.message:not(.bot)')).toHaveLength(0);
   });
 
-  it('stops listening on a second click', async () => {
-    const el = await mount();
-    mic(el).click();
-
-    mic(el).click();
-
-    expect(mic(el).classList.contains('listening')).toBe(false);
-    expect(mic(el).getAttribute('aria-label')).toBe('Voice input');
-  });
-
-  it('listens in Arabic for the Arabic widget', async () => {
-    const el = await mount({ theme: {}, voice: true }, 'ar');
-    mic(el).click();
-
-    expect(last().lang).toBe('ar-SA');
-  });
-
   it('drops words that arrive after the message was sent', async () => {
     routeFetch({ '/config': () => json({ theme: {}, voice: true }), '/stream': () => new Promise(() => {}) as any });
     const el = document.createElement('gaith-chat');

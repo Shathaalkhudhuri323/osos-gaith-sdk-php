@@ -1,12 +1,17 @@
 <?php
 
 /**
- * Checks an identity proof the way GAITH must (build plan step 3.2), for the fake GAITH
- * server next to this file. Not part of the SDK: the SDK only signs.
+ * Checks an identity proof, for the fake GAITH server in this folder. It is not part of the
+ * SDK: the SDK only creates proofs.
  *
- * Every check here is one GAITH needs too, so this doubles as a reference for that work:
- * a fixed algorithm, the signature, issuer, audience, time window with clock skew, a
- * short lifetime, plain ids, and a `jti` that is never accepted twice.
+ * Real GAITH will need to make exactly these checks (build plan step 3.2), so this file is
+ * also an example for that work:
+ *   - the signing method is RS256 and nothing else
+ *   - the signature matches the product's public key
+ *   - the proof comes from the expected product and is meant for this chatbot
+ *   - it is not expired and not dated in the future (allowing a minute of clock difference)
+ *   - it is short-lived, and its customer and person are plain ids
+ *   - its random id has never been accepted before, so it cannot be used twice
  */
 final class FakeGaithProofVerifier
 {
@@ -51,7 +56,8 @@ final class FakeGaithProofVerifier
             throw new \RuntimeException('malformed proof');
         }
 
-        // Never let the token pick its own algorithm ("none", or HS256 keyed with the public key).
+        // Never let the proof choose how it is checked. Attackers try "none" (no signature)
+        // or HS256 (a shared-secret method, signed using the public key as the secret).
         if (($header['alg'] ?? null) !== 'RS256') {
             throw new \RuntimeException('algorithm not allowed');
         }
@@ -91,7 +97,7 @@ final class FakeGaithProofVerifier
         if (!is_string($jti) || !preg_match('/^[0-9a-f]{32}$/', $jti)) {
             throw new \RuntimeException('bad jti');
         }
-        // Checked last, so a proof that fails another check does not burn its jti.
+        // This is checked last, so a proof that fails another check is not marked as used.
         $this->rememberOnce($jti, $exp + self::SKEW_SECONDS, $now);
 
         return $claims;
@@ -101,7 +107,8 @@ final class FakeGaithProofVerifier
     {
         $handle = fopen($this->replayFile, 'c+');
         if ($handle === false || !flock($handle, LOCK_EX)) {
-            // GAITH refuses when its replay store (Redis) is down; so does the fake.
+            // If we cannot record which proofs were used, we refuse rather than risk accepting
+            // one twice. Real GAITH must do the same when its store (Redis) is down.
             throw new \RuntimeException('replay store unavailable');
         }
         try {

@@ -1,8 +1,9 @@
 <?php
 
 /**
- * Talks to a running fake GAITH (or a real one) exactly as a host app would: signs a
- * proof per request, asks whether the chatbot is on, then streams one chat turn.
+ * A quick check from the command line. It talks to a running fake GAITH the same way a
+ * product would: it signs a proof for each request, asks whether the chatbot is on for
+ * this customer, and then sends one message and prints the reply as it arrives.
  *
  *   php examples/fake-gaith/try.php
  *
@@ -68,7 +69,7 @@ try {
     $on = $client->isEnabledFor($user);
     echo 'Chatbot on for this customer: ' . ($on ? 'yes' : 'no') . "\n";
     if (!$on) {
-        exit(0); // what the chat box does: stay hidden
+        exit(0); // the chat box would stay hidden here, so we stop too
     }
     echo "\n";
 

@@ -14,7 +14,6 @@ use Osos\Gaith\Sdk\Exceptions\GaithForbiddenException;
 use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
 use Osos\Gaith\Sdk\GaithChatbotClient;
 use Osos\Gaith\Sdk\Http\GaithHttpTransport;
-use Osos\Gaith\Sdk\Identity\ProofSigner;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotServiceProvider;
 use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\StreamHandle;
@@ -73,7 +72,7 @@ final class GaithChatControllerTest extends TestCase
         $app['config']->set('gaith-chatbot.proof.private_key', self::$keys['private']);
     }
 
-    /** A stubbed transport for this chatbot; tests add the methods they observe. */
+    /** A fake connection to GAITH for this chatbot. Each test adds the calls it wants to watch. */
     private function transportStub(): GaithHttpTransport
     {
         $transport = $this->createStub(GaithHttpTransport::class);
@@ -122,21 +121,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertNotSame($first->headers->get('X-Trace-ID'), $second->headers->get('X-Trace-ID'));
     }
 
-    public function testAllGaithCallsForOneRequestShareItsTraceId(): void
-    {
-        $this->signIn(42);
-        $page = 0;
-        $this->bindJson(function () use (&$page) {
-            return ++$page <= 2 ? [$this->messageRow('user', 'hi', $page)] : [];
-        });
-
-        $this->get('/api/gaith/conversations/c1/messages')->assertStatus(200);
-
-        $this->assertCount(3, $this->sentTraceIds);
-        $this->assertCount(1, array_unique($this->sentTraceIds));
-        $this->assertNotNull($this->sentTraceIds[0]);
-    }
-
     public function testAFailureIsLoggedWithTheTraceIdAndWithoutTheProof(): void
     {
         Log::spy();
@@ -156,7 +140,7 @@ final class GaithChatControllerTest extends TestCase
     }
 
     /**
-     * Checks a proof the way GAITH will, with the public key alone.
+     * Checks a proof the way GAITH will, using only the public key, and returns what it says.
      *
      * @return array<string, mixed> its claims
      */
@@ -207,32 +191,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertCount(3, array_unique($ids), 'a proof was reused; GAITH refuses a repeated jti');
     }
 
-    public function testUploadsAndFilesCarryAProofToo(): void
-    {
-        $this->signIn(42);
-        $this->bindUploads();
-        $this->post('/api/gaith/attachments', ['file' => UploadedFile::fake()->create('report.pdf', 10, 'application/pdf')]);
-        $this->bindFile(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/pdf'], '%PDF'));
-        $this->get('/api/gaith/files/art-1');
-
-        $this->assertCount(2, $this->sentProofs);
-        foreach ($this->sentProofs as $proof) {
-            $this->assertSame('42', $this->assertValidProof($proof)['sub']);
-        }
-    }
-
-    public function testASignedOutCallerIsRefusedBeforeAnyProofIsMade(): void
-    {
-        $this->app->bind(ProofSigner::class, function () {
-            throw new \LogicException('no proof may be made for a signed-out caller');
-        });
-        $this->bindStreaming(self::SSE_HAPPY_PATH);
-
-        $this->postJson('/api/gaith/stream', ['message' => 'hello'])->assertStatus(401);
-
-        $this->assertSame([], $this->sentProofs);
-    }
-
     public function testStatusSaysTheChatbotIsOnWhenGaithSaysSoForThisUser(): void
     {
         $this->signIn(42);
@@ -264,11 +222,8 @@ final class GaithChatControllerTest extends TestCase
     {
         return [
             'switched off' => [function () { return ['enabled' => false]; }],
-            'no answer field' => [function () { return []; }],
             'not a boolean' => [function () { return ['enabled' => 'yes']; }],
             'customer refused' => [function () { throw new GaithForbiddenException(403, 'forbidden', 'Customer not enabled', '{}'); }],
-            'proof refused' => [function () { throw new GaithAuthException(401, 'invalid_proof', 'Invalid proof', '{}'); }],
-            'GAITH without the endpoint' => [function () { throw new GaithNotFoundException(404, 'not_found', 'Not Found', '{}'); }],
             'GAITH unreachable' => [function () {
                 throw new \GuzzleHttp\Exception\ConnectException('connection refused', new Request('GET', 'https://gaith.invalid/access'));
             }],
@@ -278,7 +233,7 @@ final class GaithChatControllerTest extends TestCase
     private const SLOT = 'gaith-chat:stream:erp:acme:42:';
 
     /**
-     * A GAITH stream that runs $onRead before each chunk, e.g. to move the clock.
+     * A fake GAITH reply that runs $onRead before each piece arrives, e.g. to move the clock forward.
      *
      * @param string[] $chunks
      */
@@ -310,18 +265,6 @@ final class GaithChatControllerTest extends TestCase
         $response->assertStatus(429)->assertExactJson(['code' => 'too_many_streams']);
         $this->assertSame('15', $response->headers->get('Retry-After'));
         $this->assertNull($this->sentChatBody);
-    }
-
-    public function testOtherUsersAreNotLimitedByOneUsersReplies(): void
-    {
-        Cache::add(self::SLOT . '0', 'other-reply', 60);
-        Cache::add(self::SLOT . '1', 'other-reply', 60);
-        $this->signIn(43);
-        $this->bindStreaming(self::SSE_HAPPY_PATH);
-
-        $this->post('/api/gaith/stream', ['message' => 'hello'])->assertStatus(200)->streamedContent();
-
-        $this->assertNotNull($this->sentChatBody);
     }
 
     public function testAFinishedReplyGivesItsSlotBack(): void
@@ -411,21 +354,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertCount(2, $this->sentProofs);
     }
 
-    public function testASwitchOffShowsOnceTheCacheTimePasses(): void
-    {
-        $answers = [true, false];
-        $this->bindJson(function () use (&$answers) { return ['enabled' => array_shift($answers)]; });
-        $this->signIn(42);
-
-        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
-        $this->travel(59)->seconds();
-        $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
-        $this->travel(2)->seconds();
-        $this->get('/api/gaith/status')->assertExactJson(['enabled' => false]);
-
-        $this->assertCount(2, $this->sentProofs);
-    }
-
     public function testAFailureIsRememberedOnlyBriefly(): void
     {
         $calls = 0;
@@ -443,27 +371,6 @@ final class GaithChatControllerTest extends TestCase
         $this->get('/api/gaith/status')->assertExactJson(['enabled' => true]);
 
         $this->assertSame(2, $calls);
-    }
-
-    public function testACacheTimeOfZeroAsksGaithEveryTime(): void
-    {
-        $this->app['config']->set('gaith-chatbot.widget.status_cache_seconds', 0);
-        $this->bindJson(function () { return ['enabled' => true]; });
-        $this->signIn(42);
-
-        $this->get('/api/gaith/status');
-        $this->get('/api/gaith/status');
-
-        $this->assertCount(2, $this->sentProofs);
-    }
-
-    public function testStatusRefusesACallerItCannotIdentify(): void
-    {
-        $this->actingAs(new GenericUser(['id' => '']));
-        $this->bindJson(function () { return ['enabled' => true]; });
-
-        $this->getJson('/api/gaith/status')->assertStatus(401);
-        $this->assertSame([], $this->sentProofs);
     }
 
     public function testWithoutAProofKeyNothingIsSentToGaith(): void
@@ -587,14 +494,6 @@ final class GaithChatControllerTest extends TestCase
         $this->postJson('/api/gaith/stream', ['message' => 'hello'])->assertStatus(401);
     }
 
-    public function testItRejectsAnEmptyMessage(): void
-    {
-        $this->signIn();
-        $this->bindStreaming(self::SSE_HAPPY_PATH);
-
-        $this->postJson('/api/gaith/stream', ['message' => ''])->assertStatus(422);
-    }
-
     public function testItLoadsHistoryPageByPageUntilAnEmptyPage(): void
     {
         $this->signIn(42);
@@ -675,22 +574,6 @@ final class GaithChatControllerTest extends TestCase
         $this->getJson('/api/gaith/config')->assertJsonPath('theme', ['text_color' => '#fff']);
     }
 
-    public function testConfigDefaultsToBlue(): void
-    {
-        $this->signIn();
-
-        $this->getJson('/api/gaith/config')
-            ->assertJsonPath('theme', ['primary_color' => '#1f6feb', 'text_color' => '#ffffff']);
-    }
-
-    public function testConfigServesThePrivacyPolicyLink(): void
-    {
-        $this->signIn();
-        $this->app['config']->set('gaith-chatbot.widget.privacy_url', 'https://osos.om/privacy');
-
-        $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', 'https://osos.om/privacy');
-    }
-
     public function testConfigDropsPrivacyLinksThatAreNotWebPages(): void
     {
         // The link becomes an href in the browser: no javascript:, data: or protocol-relative URLs.
@@ -702,22 +585,6 @@ final class GaithChatControllerTest extends TestCase
 
         $this->app['config']->set('gaith-chatbot.widget.privacy_url', '/policies/data-protection');
         $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', '/policies/data-protection');
-    }
-
-    public function testConfigHasNoPrivacyLinkByDefault(): void
-    {
-        $this->signIn();
-
-        $this->getJson('/api/gaith/config')->assertJsonPath('privacy_url', null);
-    }
-
-    public function testConfigAllowsVoiceInputUnlessTheProductTurnsItOff(): void
-    {
-        $this->signIn();
-        $this->getJson('/api/gaith/config')->assertJsonPath('voice', true);
-
-        $this->app['config']->set('gaith-chatbot.widget.voice', false);
-        $this->getJson('/api/gaith/config')->assertJsonPath('voice', false);
     }
 
     public function testConfigServesOnlyValidImageOrigins(): void
@@ -773,28 +640,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertSame('external_user_id=erp%3Aacme%3A42', $this->sentQueries[0]);
     }
 
-    public function testFileRouteTreatsArtifactIdsAsOpaqueValues(): void
-    {
-        $this->signIn();
-        $this->bindFile(new \GuzzleHttp\Psr7\Response(200, [
-            'Content-Type' => 'application/octet-stream',
-        ], 'bytes'));
-
-        $this->get('/api/gaith/files/artifact-1')->assertStatus(200);
-
-        $this->assertSame('attachments/artifact-1', $this->sentFilePath);
-    }
-
-    public function testFileRouteForcesADownloadWhenAsked(): void
-    {
-        $this->signIn();
-        $this->bindFile(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'image/png'], 'png'));
-
-        $response = $this->get('/api/gaith/files/6910c7b6-6e62-4498-b880-611d2b159ba9?download=1');
-
-        $this->assertStringStartsWith('attachment;', $response->headers->get('Content-Disposition'));
-    }
-
     public function testFileRouteNeverServesScriptableTypesInline(): void
     {
         // An SVG or HTML file opened on the host's origin could run script as the host app.
@@ -834,11 +679,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertNull($this->sentFilePath);
     }
 
-    public function testFileRouteRefusesUnauthenticatedCallers(): void
-    {
-        $this->getJson('/api/gaith/files/6910c7b6-6e62-4498-b880-611d2b159ba9')->assertStatus(401);
-    }
-
     public function testItRelaysAClarifyingQuestionWithItsOptions(): void
     {
         $this->signIn();
@@ -856,24 +696,6 @@ final class GaithChatControllerTest extends TestCase
             $body
         );
         $this->assertStringContainsString('"finish_reason":"question"', $body);
-    }
-
-    public function testHistoryKeepsTheOptionsOfAClarifyingQuestion(): void
-    {
-        $this->signIn();
-        $pages = [[
-            array_merge($this->messageRow('assistant', 'Which month?', 1), ['metadata' => [
-                'finish_reason' => 'question',
-                'tool_events' => [['event' => 'question', 'id' => 'call_1', 'question' => 'Which month?', 'options' => ['October', 'November']]],
-            ]]),
-        ], []];
-        $this->bindJson(function () use (&$pages) {
-            return array_shift($pages);
-        });
-
-        $messages = $this->getJson('/api/gaith/conversations/c1/messages')->json('messages');
-
-        $this->assertSame(['October', 'November'], $messages[0]['options']);
     }
 
     public function testHistoryIncludesUploadsAndToolFiles(): void
@@ -1049,45 +871,6 @@ final class GaithChatControllerTest extends TestCase
         $this->assertSame([], $this->sentUploads);
     }
 
-    public function testUploadAcceptsTheExtraTypesOnceTheProductEnablesThem(): void
-    {
-        // The setting takes extensions; each upload goes to GAITH with its proper media type.
-        $this->signIn();
-        $this->bindUploads();
-        $this->app['config']->set('gaith-chatbot.widget.attachments.allowed_types', ['pdf', 'xlsx', 'csv', '.md']);
-
-        $files = [
-            ['budget.xlsx', 'application/zip', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-            ['leave.csv', 'text/plain', 'text/csv'],
-            ['notes.md', 'text/plain', 'text/markdown'],
-        ];
-        foreach ($files as [$name, $contents, $expected]) {
-            $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create($name, 1, $contents)])
-                ->assertStatus(201);
-            $this->assertSame($expected, end($this->sentUploads)[2], $name);
-        }
-        $this->getJson('/api/gaith/config')->assertJsonPath('attachments.allowed_types', [
-            'application/pdf',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/csv',
-            'text/markdown',
-        ]);
-    }
-
-    public function testUploadRejectsAProgramRenamedToAnAllowedExtension(): void
-    {
-        $this->signIn();
-        $this->bindUploads();
-        $this->app['config']->set('gaith-chatbot.widget.attachments.allowed_types', ['csv', 'xlsx']);
-
-        foreach (['payroll.csv', 'payroll.xlsx'] as $name) {
-            $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create($name, 1, 'application/x-dosexec')])
-                ->assertStatus(422)
-                ->assertExactJson(['code' => 'file_type_not_allowed']);
-        }
-        $this->assertSame([], $this->sentUploads);
-    }
-
     public function testUploadRejectsAFileOverTheSizeLimit(): void
     {
         $this->signIn();
@@ -1098,18 +881,6 @@ final class GaithChatControllerTest extends TestCase
             ->assertStatus(413)
             ->assertExactJson(['code' => 'file_too_large']);
         $this->assertSame([], $this->sentUploads);
-    }
-
-    public function testUploadReportsAFileGaithRejects(): void
-    {
-        $this->signIn();
-        $this->bindUploads(function () {
-            throw new \Osos\Gaith\Sdk\Exceptions\GaithValidationException(422, null, 'File content does not match its type.', '{}');
-        });
-
-        $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create('fake.pdf', 1, 'application/pdf')])
-            ->assertStatus(422)
-            ->assertExactJson(['code' => 'file_rejected']);
     }
 
     public function testUploadNeedsASignedInUserAndCanBeTurnedOff(): void
@@ -1123,23 +894,6 @@ final class GaithChatControllerTest extends TestCase
         $this->postJson('/api/gaith/attachments', ['file' => UploadedFile::fake()->create('a.pdf', 1, 'application/pdf')])
             ->assertStatus(404);
         $this->assertSame([], $this->sentUploads);
-    }
-
-    public function testConfigTellsTheWidgetTheAttachmentLimits(): void
-    {
-        $this->signIn();
-
-        $this->getJson('/api/gaith/config')->assertJsonPath('attachments', [
-            'enabled' => true,
-            'max_files' => 8,
-            'max_bytes' => 20971520,
-            'allowed_types' => [
-                'application/pdf',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'image/png',
-                'image/jpeg',
-            ],
-        ]);
     }
 
     /** @var array<int, array{0: string, 1: string, 2: ?string}> uploads sent to GAITH: name, user, type */

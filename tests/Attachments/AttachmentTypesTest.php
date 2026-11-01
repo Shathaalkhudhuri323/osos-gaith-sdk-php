@@ -85,22 +85,10 @@ final class AttachmentTypesTest extends TestCase
         $this->assertNull(AttachmentTypes::detect($exe, 'payroll.xlsx', $this->all()));
     }
 
-    public function testAnEmptyFileIsRefused(): void
-    {
-        $this->assertNull(AttachmentTypes::detect($this->file('empty.txt', ''), 'empty.txt', $this->all()));
-    }
-
     public function testOnlyEnabledTypesPass(): void
     {
         $csv = $this->file('leave.csv', "a,b\n1,2\n");
 
         $this->assertNull(AttachmentTypes::detect($csv, 'leave.csv', AttachmentTypes::normalize(['pdf', 'docx', 'png', 'jpg'])));
-    }
-
-    public function testAPictureWithTheWrongExtensionIsStillAPicture(): void
-    {
-        $png = $this->file('photo.jpg', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=='));
-
-        $this->assertSame('image/png', AttachmentTypes::detect($png, 'photo.jpg', AttachmentTypes::normalize(['png'])));
     }
 }

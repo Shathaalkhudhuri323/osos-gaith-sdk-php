@@ -109,7 +109,11 @@ function formatSize(bytes: number): string {
   return bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-/** localStorage can throw (private windows, blocked storage); treat that as "not stored". */
+/**
+ * Reads a value the page saved in the browser (localStorage), or null if there is none.
+ * Some browsers block storage, for example in private windows, and then reading it throws
+ * an error; we treat that the same as "nothing saved".
+ */
 function stored(key: string | null): string | null {
   if (!key) { return null; }
   try {
@@ -128,8 +132,9 @@ function pad(n: number): string {
  * <gaith-chat endpoint="api/gaith" lang="en" bot-name="GAITH"></gaith-chat>
  *
  * Talks only to the host's own backend routes (osos/gaith-sdk-php Laravel bridge),
- * never to GAITH. The host signs requests by setting `getHeaders`, or, with no
- * JavaScript at all, names where the page keeps its sign-in token and language:
+ * never to GAITH. The product passes its sign-in details by setting `getHeaders`, or,
+ * without writing any JavaScript, by saying where the page keeps its sign-in token and
+ * language in the browser:
  *
  *   <gaith-chat token-storage-key="access_token" lang-storage-key="lang"></gaith-chat>
  */
@@ -220,9 +225,13 @@ export class GaithChatElement extends HTMLElement {
   }
 
   /**
-   * The headers for each request: the host's `getHeaders` when set, otherwise a bearer
-   * token read from localStorage at `token-storage-key`. Read per request, so a token
-   * the page refreshes is used at once; it goes only to the host's own `endpoint`.
+   * The sign-in headers sent with each request to the product's backend.
+   *
+   * If the product set `getHeaders`, we use that. Otherwise, if the tag has
+   * `token-storage-key`, we read the page's sign-in token from the browser and send it as
+   * "Authorization: Bearer <token>". The token is read again for every request, so when the
+   * page refreshes its token the chat box uses the new one at once. The token only goes to
+   * the product's own backend (`endpoint`), which already receives it from the page.
    */
   private get headerProvider(): HeaderProvider | null {
     if (this._getHeaders) {

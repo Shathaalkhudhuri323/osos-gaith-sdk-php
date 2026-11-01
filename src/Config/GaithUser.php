@@ -2,18 +2,27 @@
 
 namespace Osos\Gaith\Sdk\Config;
 
+/**
+ * The user a request to GAITH is made for: their GAITH user id, plus the extra headers
+ * that go with each request for them (the identity proof and the trace id).
+ */
 final class GaithUser
 {
-    /** The header GAITH reads the signed identity proof from. */
+    // The header that carries the signed identity proof to GAITH.
     public const PROOF_HEADER = 'X-Gaith-Identity-Proof';
 
-    /** The header GAITH takes a caller's trace id from (app/main.py). */
+    // The header GAITH already reads to tie its logs to ours (see GAITH's app/main.py).
     public const TRACE_HEADER = 'X-Trace-ID';
 
     /** @var string */
     private $id;
 
-    /** @var callable|null fn(string $chatbotId): string, one fresh proof per call */
+    /**
+     * A function that makes a new proof when called. We keep a function instead of one
+     * proof because every request needs a fresh one: GAITH refuses a proof it has seen before.
+     *
+     * @var callable|null fn(string $chatbotId): string
+     */
     private $proof;
 
     /** @var string|null */
@@ -44,11 +53,11 @@ final class GaithUser
     }
 
     /**
-     * Sends a signed identity proof with every request made for this user. The minter
-     * is called once per HTTP request - a resumed stream included - because GAITH
-     * refuses a proof whose `jti` it has already seen.
+     * Attach an identity proof to every request made for this user. The function is
+     * called once per request, including when a dropped reply is picked up again,
+     * so each request gets its own proof.
      *
-     * @param callable $mint fn(string $chatbotId): string, the chatbot the request goes to
+     * @param callable $mint fn(string $chatbotId): string, given the chatbot the request goes to
      */
     public function withProof(callable $mint): self
     {
@@ -59,9 +68,9 @@ final class GaithUser
     }
 
     /**
-     * Sends this trace id with every request made for this user, so one chat turn can
-     * be followed through the host's, GAITH's and the MCP's logs. GAITH reads it as
-     * X-Trace-ID. Unlike the proof it stays the same across a resumed stream.
+     * Attach a trace id to every request made for this user. It lets you follow one chat
+     * message through the product's logs, GAITH's logs and the MCP's logs. Unlike the
+     * proof, it stays the same for the whole message, even if the reply is picked up again.
      */
     public function withTraceId(string $traceId): self
     {
@@ -77,8 +86,10 @@ final class GaithUser
     }
 
     /**
-     * @return array<string, string> headers for one request to $chatbotId: a fresh proof
-     *                               and the trace id, each only when set
+     * The extra headers for one request to the given chatbot: a new proof and the trace id,
+     * each only if it was set.
+     *
+     * @return array<string, string>
      */
     public function requestHeaders(string $chatbotId): array
     {

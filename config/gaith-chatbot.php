@@ -13,44 +13,49 @@ return [
     ],
 
     /*
-     * Who is chatting, read from the host's signed-in user on the server. Product,
-     * customer and person become the GAITH user id (qhse:7:42), so histories of
-     * different customers or products never mix. Never point these at anything the
-     * browser sends.
+     * Who is chatting. The SDK reads this on the server from the signed-in user.
      *
-     * customer / person sources:
-     *   user:<path>   attribute of the signed-in user, dots follow relations
-     *   config:<key>  config value the host sets server-side (e.g. its tenant middleware)
-     *   value:<text>  fixed value, for a deployment with one customer
-     * person left empty = the signed-in user's id.
+     * product, customer and person are joined into the user id GAITH files chats under,
+     * e.g. "qhse:7:42". Because the customer is part of it, chats of different customers
+     * (or different products) never mix, even when two employees have the same number.
      *
-     *   QHSE: product qhse, customer user:employee.centralDBCompanyID,
-     *         person user:employee.employeeSystemID (the same ids the QHSE MCP uses)
-     *   ERP:  product erp, customer config:database.connections.mysql.database
-     *         (the tenant database its tenant middleware selects), person empty
+     * customer and person say where to find the value:
+     *   user:<field>   a field of the signed-in user; dots go into related records
+     *   config:<key>   a config value the product sets on the server (e.g. in its tenant middleware)
+     *   value:<text>   a fixed value, for an installation with only one customer
+     * Leave person empty to use the signed-in user's normal id.
+     *
+     * Examples:
+     *   QHSE: product "qhse", customer "user:employee.centralDBCompanyID",
+     *         person "user:employee.employeeSystemID" (the same ids the QHSE MCP uses)
+     *   ERP:  product "erp", customer "config:database.connections.mysql.database"
+     *         (the customer's database, chosen by the ERP's tenant middleware), person empty
+     *
+     * Never point these at anything the browser sends.
      */
     'identity' => [
         'product' => env('GAITH_IDENTITY_PRODUCT'),
         'customer' => env('GAITH_IDENTITY_CUSTOMER'),
         'person' => env('GAITH_IDENTITY_PERSON'),
 
-        // A product whose ids cannot be described above names its own class here. Must
-        // implement Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver. A class name,
-        // not a closure, so `php artisan config:cache` keeps working.
+        // If a product's users cannot be described with the settings above, it can write its
+        // own class (implementing Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver) and
+        // name it here. It must be a class name, not a function, so `php artisan config:cache`
+        // keeps working.
         'resolver' => \Osos\Gaith\Sdk\Laravel\Identity\ConfiguredProductUserResolver::class,
     ],
 
     /*
-     * Key for the identity proof: a short-lived RS256 JWT, signed here and sent to GAITH
-     * with every chat request, saying which user (identity above) is chatting. GAITH
-     * checks it with the public half registered on the chatbot's API key.
+     * The key used to sign the identity proof: a small signed note sent to GAITH with every
+     * request, saying which user (from the settings above) is chatting. GAITH checks the note
+     * with the matching public key, which is saved on the chatbot's API key in GAITH.
      *
-     * One key pair per environment. The private key belongs in the host's secret store,
-     * never in Git, email or chat. Give it either as PEM text (newlines may be written
-     * as \n in .env) or as a path to a PEM file, not both.
+     * Use one key pair per environment (dev, prod...). Keep the private key in the server's
+     * secret store, never in Git, email or chat. Give either the key text (line breaks can be
+     * written as \n in .env) or the path of the key file, not both.
      */
     'proof' => [
-        // The id GAITH has this key's public half registered under, e.g. qhse-prod-1.
+        // The name GAITH knows this key by, e.g. qhse-prod-1.
         'key_id' => env('GAITH_PROOF_KEY_ID'),
         'private_key' => env('GAITH_PROOF_PRIVATE_KEY'),
         'private_key_path' => env('GAITH_PROOF_PRIVATE_KEY_PATH'),
@@ -122,18 +127,22 @@ return [
         // conversation cannot hold a PHP worker for many sequential GAITH calls.
         'history_max_messages' => 500,
 
-        // How long {prefix}/status keeps GAITH's on/off answer per customer, in seconds, so
-        // page loads do not each call GAITH. Also the longest a switch-off takes to show.
-        // 0 asks GAITH on every page load. Failures are kept for at most 10 s.
+        // How many seconds to remember GAITH's "is the chatbot on for this customer?" answer,
+        // so that not every page load has to ask GAITH. This is also the longest it takes for a
+        // switch-off in GAITH to hide the chat box. 0 means ask GAITH on every page load.
+        // A failed answer is remembered for at most 10 seconds.
         'status_cache_seconds' => (int) env('GAITH_CHAT_WIDGET_STATUS_CACHE_SECONDS', 60),
 
-        // Each open reply holds one PHP worker. One user may have this many streaming at once;
-        // more get 429 too_many_streams before anything reaches GAITH. Needs a cache store with
-        // atomic add (redis, memcached, database, array), not the file store.
+        // While a reply is being written it keeps one PHP worker busy. This is how many replies
+        // one user may have running at the same time; another one gets "busy, try again"
+        // (429 too_many_streams) without anything being sent to GAITH. Other users are not
+        // affected. Use a cache store that supports this safely (redis, memcached or database),
+        // not the file store.
         'max_streams_per_user' => (int) env('GAITH_CHAT_WIDGET_MAX_STREAMS_PER_USER', 2),
 
-        // Longest one reply may stream, in seconds (0 = no limit here). GAITH's own per-chatbot
-        // limit ("Max seconds per reply", at most 600 today) still applies and is usually shorter.
+        // The longest one reply may take, in seconds (0 means no limit here). GAITH has its own
+        // limit per chatbot ("Max seconds per reply", at most 600 today), which usually ends the
+        // reply sooner.
         'max_reply_seconds' => (int) env('GAITH_CHAT_WIDGET_MAX_REPLY_SECONDS', 3600),
     ],
 ];

@@ -15,11 +15,9 @@ final class ProductUserTest extends TestCase
         $this->assertSame('7', $user->customer());
         $this->assertSame('42', $user->person());
         $this->assertSame('qhse:7:42', $user->externalUserId());
-    }
 
-    public function testIntegerIdsFromTheDatabaseAreAccepted(): void
-    {
-        $this->assertSame('erp:acme_db:42', ProductUser::create('erp', 'acme_db', 42)->externalUserId());
+        // Ids straight from the database (integers) and stray spaces are fine too.
+        $this->assertSame('erp:acme_db:42', ProductUser::create('erp', ' acme_db ', 42)->externalUserId());
     }
 
     /**
@@ -46,11 +44,6 @@ final class ProductUserTest extends TestCase
             'array' => [['7']],
             'too long' => [str_repeat('a', 101)],
         ];
-    }
-
-    public function testSurroundingSpacesAreTrimmed(): void
-    {
-        $this->assertSame('qhse:7:42', ProductUser::create('qhse', ' 7 ', "42\n")->externalUserId());
     }
 
     /**

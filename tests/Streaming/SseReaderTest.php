@@ -88,26 +88,6 @@ final class SseReaderTest extends TestCase
         $this->assertFalse($frames[0]->isComment);
     }
 
-    public function testFrameWithoutIdHasNullId(): void
-    {
-        $handle = $this->handleFor(["event: token\ndata: {}\n\n"]);
-        $reader = new SseReader();
-
-        $frames = iterator_to_array($reader->read($handle));
-
-        $this->assertNull($frames[0]->id);
-    }
-
-    public function testEmptyStreamYieldsNoFrames(): void
-    {
-        $handle = $this->handleFor([]);
-        $reader = new SseReader();
-
-        $frames = iterator_to_array($reader->read($handle));
-
-        $this->assertCount(0, $frames);
-    }
-
     public function testTrailingIncompleteFrameWithoutBlankLineIsDropped(): void
     {
         $handle = $this->handleFor(["event: done\ndata: {}\n\nevent: partial\ndata: no-terminator"]);

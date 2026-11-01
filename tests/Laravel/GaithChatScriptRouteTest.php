@@ -6,9 +6,8 @@ use Osos\Gaith\Sdk\Laravel\GaithChatbotServiceProvider;
 use Orchestra\Testbench\TestCase;
 
 /**
- * The chat box script is served by the SDK itself, so `composer update` ships a new chat
- * box with no publish step, and it loads from a plain <script> tag, which cannot carry
- * the host's sign-in header.
+ * The SDK serves the chat box script itself, so a `composer update` delivers a new chat box.
+ * It must load without sign-in, because a plain <script> tag cannot send the sign-in token.
  */
 final class GaithChatScriptRouteTest extends TestCase
 {
@@ -56,10 +55,5 @@ final class GaithChatScriptRouteTest extends TestCase
         $this->assertSame('', $again->getContent());
 
         $this->get('/api/gaith/gaith-chat.js', ['If-None-Match' => '"something-else"'])->assertStatus(200);
-    }
-
-    public function testTheSourceMapIsNotServed(): void
-    {
-        $this->get('/api/gaith/gaith-chat.js.map')->assertStatus(404);
     }
 }

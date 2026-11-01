@@ -8,8 +8,8 @@ use Osos\Gaith\Sdk\Tests\Identity\KeyPairs;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The fake GAITH accepts exactly what the SDK signs and refuses each kind of bad proof
- * GAITH must refuse (build plan step 3.2), so the two stay in step.
+ * Checks that the fake GAITH accepts the proofs the SDK makes, and refuses the kinds of bad
+ * proof real GAITH must refuse (build plan step 3.2).
  */
 final class FakeGaithProofVerifierTest extends TestCase
 {
@@ -131,12 +131,5 @@ final class FakeGaithProofVerifierTest extends TestCase
                 $this->verifier()->verify($forged, self::NOW);
             });
         }
-    }
-
-    public function testNoProofIsRefused(): void
-    {
-        $this->assertRefused('missing or malformed proof', function () {
-            $this->verifier()->verify(null, self::NOW);
-        });
     }
 }

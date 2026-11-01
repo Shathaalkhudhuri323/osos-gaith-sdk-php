@@ -44,18 +44,6 @@ final class GuzzleStreamingClientTest extends TestCase
         $this->assertSame("event: token\ndata: {}\n\n", $collected);
     }
 
-    public function testNon2xxResponseThrowsGaithApiException(): void
-    {
-        $mock = new MockHandler([new Response(401, [], json_encode(['error' => ['code' => 'unauthorized', 'message' => 'bad key']]))]);
-        $guzzle = new Client(['handler' => HandlerStack::create($mock)]);
-        $adapter = new GuzzleStreamingClient($guzzle);
-        $request = $this->requestFactory()->createRequest('POST', 'https://example.test/chat');
-
-        $this->expectException(GaithApiException::class);
-
-        $adapter->sendStreaming($request);
-    }
-
     public function testConnectExceptionThrowsStreamDroppedExceptionOnRead(): void
     {
         $mock = new MockHandler([

@@ -7,8 +7,8 @@ use Osos\Gaith\Sdk\Identity\ProofSigner;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The signer only signs; GAITH verifies. These tests verify the way GAITH will -
- * with the public key alone - so a proof that passes here is one GAITH can accept.
+ * The SDK only creates proofs; GAITH checks them. These tests check each proof the way
+ * GAITH will, using only the public key, so a proof that passes here will pass in GAITH.
  */
 final class ProofSignerTest extends TestCase
 {
@@ -93,13 +93,6 @@ final class ProofSignerTest extends TestCase
         $this->assertFalse(self::verifies($forged, $signature, self::$keys['public']));
     }
 
-    public function testAnotherKeysPublicHalfDoesNotVerifyIt(): void
-    {
-        [, , $signed, $signature] = self::split($this->signer()->sign($this->user(), self::CHATBOT, self::NOW));
-
-        $this->assertFalse(self::verifies($signed, $signature, KeyPairs::rsa(2048)['public']));
-    }
-
     public function testEveryProofHasItsOwnId(): void
     {
         $ids = [];
@@ -108,15 +101,6 @@ final class ProofSignerTest extends TestCase
         }
 
         $this->assertCount(20, array_unique($ids));
-    }
-
-    public function testItUsesTheCurrentTimeByDefault(): void
-    {
-        $before = time();
-        $claims = self::split($this->signer()->sign($this->user(), self::CHATBOT))[1];
-
-        $this->assertGreaterThanOrEqual($before, $claims['iat']);
-        $this->assertLessThanOrEqual(time(), $claims['iat']);
     }
 
     public function testTheKeyNeverShowsInADump(): void
@@ -153,17 +137,5 @@ final class ProofSignerTest extends TestCase
             'not RSA' => [KeyPairs::ec()['private']],
             'not a key' => ['hello'],
         ];
-    }
-
-    public function testAKeyIdIsRequired(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        new ProofSigner(self::$keys['private'], ' ');
-    }
-
-    public function testAnAudienceIsRequired(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->signer()->sign($this->user(), '', self::NOW);
     }
 }

@@ -38,7 +38,7 @@ final class GaithChatbotClient
         $this->sseReader = new SseReader();
     }
 
-    /** The chatbot this client talks to. */
+    /** The id of the GAITH chatbot this client talks to. */
     public function chatbotId(): string
     {
         return $this->transport->chatbotId();
@@ -50,9 +50,9 @@ final class GaithChatbotClient
     }
 
     /**
-     * Whether this chatbot is switched on for the user's customer. GAITH keeps that
-     * list; the user comes from the proof the user carries. Only an explicit `true`
-     * counts, so a malformed answer reads as off.
+     * Asks GAITH whether this chatbot is switched on for the user's customer. GAITH keeps
+     * the list of customers that may use the chatbot, and knows the customer from the proof.
+     * Only a clear "true" counts as on; anything else, even a strange answer, counts as off.
      */
     public function isEnabledFor(GaithUser $user): bool
     {
@@ -231,7 +231,8 @@ final class GaithChatbotClient
             'external_user_id' => $user->id(),
         ]);
 
-        // Built per attempt, so a resumed stream carries a fresh proof (and the same trace id).
+        // Made again for every attempt, so if a dropped reply is picked up again the new
+        // request gets a new proof (and keeps the same trace id).
         $headers = $this->headersFor($user);
         if ($streamId !== null) {
             $headers['X-Stream-Id'] = $streamId;
@@ -244,6 +245,8 @@ final class GaithChatbotClient
     }
 
     /**
+     * The proof and trace id headers for one request for this user.
+     *
      * @return array<string, string>
      */
     private function headersFor(GaithUser $user): array

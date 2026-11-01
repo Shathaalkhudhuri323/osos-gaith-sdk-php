@@ -9,32 +9,16 @@ final class GaithUserTest extends TestCase
 {
     public function testForReturnsGivenId(): void
     {
-        $user = GaithUser::for('user-123');
-
-        $this->assertSame('user-123', $user->id());
+        $this->assertSame('user-123', GaithUser::for('user-123')->id());
     }
 
-    public function testForWithNullGeneratesAnonymousId(): void
+    public function testAMissingIdGivesEachCallerItsOwnAnonymousId(): void
     {
-        $user = GaithUser::for(null);
-
-        $this->assertNotSame('', $user->id());
-        $this->assertStringStartsWith('anon-', $user->id());
-    }
-
-    public function testForWithEmptyStringGeneratesAnonymousId(): void
-    {
-        $user = GaithUser::for('');
-
-        $this->assertStringStartsWith('anon-', $user->id());
-    }
-
-    public function testAnonymousGeneratesUniqueIds(): void
-    {
-        $a = GaithUser::anonymous();
-        $b = GaithUser::anonymous();
+        $a = GaithUser::for(null);
+        $b = GaithUser::for('');
 
         $this->assertStringStartsWith('anon-', $a->id());
+        $this->assertStringStartsWith('anon-', $b->id());
         $this->assertNotSame($a->id(), $b->id());
     }
 }

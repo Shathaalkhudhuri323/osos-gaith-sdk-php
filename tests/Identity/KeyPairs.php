@@ -3,7 +3,7 @@
 namespace Osos\Gaith\Sdk\Tests\Identity;
 
 /**
- * Throwaway key pairs made at test time, so no private key is ever committed.
+ * Makes throwaway key pairs while the tests run, so no private key is ever saved in the repo.
  */
 final class KeyPairs
 {
@@ -33,8 +33,8 @@ final class KeyPairs
     }
 
     /**
-     * PHP on Windows ships no default OpenSSL config, which key generation needs; use
-     * the copy bundled next to php.exe when OPENSSL_CONF is not set.
+     * Making keys needs an OpenSSL settings file. PHP on Windows does not set one up by
+     * default, so we use the copy that comes with PHP (next to php.exe) when none is set.
      */
     private static function config(): array
     {

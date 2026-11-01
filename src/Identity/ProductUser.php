@@ -3,15 +3,22 @@
 namespace Osos\Gaith\Sdk\Identity;
 
 /**
- * Who is chatting, as the host product knows them: which product, which customer
- * of that product, and which person at that customer.
+ * The person who is chatting, as the product (QHSE, the ERP...) knows them.
  *
- * All three come from the host's server-side session. Together they are the GAITH
- * user id (`qhse:7:42`), which partitions chat history and, later, the user's MCP
- * connections - so two customers, or two products, can never share one.
+ * It holds three things:
+ *   - product:  which product they are using, e.g. "qhse"
+ *   - customer: which customer (company) of that product they belong to, e.g. "7"
+ *   - person:   who they are inside that customer, e.g. employee "42"
+ *
+ * Joined together these make the user id we send to GAITH, e.g. "qhse:7:42".
+ * GAITH keeps each user's chat history under that id. Because the customer is part of
+ * the id, employee 42 at one customer can never see the chats of employee 42 at another.
+ *
+ * All three values are read on the server from the signed-in user, never from the browser.
  */
 final class ProductUser
 {
+    // Customer and person ids longer than this are refused; real ids are much shorter.
     private const MAX_PART_LENGTH = 100;
 
     /** @var string */
@@ -31,14 +38,18 @@ final class ProductUser
     }
 
     /**
+     * Builds the user, or returns null if the customer or person is missing or looks wrong.
+     * The caller then refuses the request, because we cannot tell who the user is.
+     *
+     * A bad product name throws instead: that is a mistake in the settings, not something
+     * the user did, so it should be loud and fixed by whoever set the product up.
+     *
      * @param string|int|mixed $customer
      * @param string|int|mixed $person
-     * @return self|null null when the customer or person is missing or unusable; the caller is then refused
-     * @throws \InvalidArgumentException when the product is invalid: that is a settings mistake, not a user one
      */
     public static function create(string $product, $customer, $person): ?self
     {
-        // GAITH reserves `member:<id>` for its own signed-in users.
+        // "member" is not allowed because GAITH already uses "member:..." for its own users.
         if (!preg_match('/^[a-z][a-z0-9-]{0,31}$/', $product) || $product === 'member') {
             throw new \InvalidArgumentException(
                 'product must be a short lowercase name such as "qhse" or "erp", and not "member"'
@@ -55,13 +66,15 @@ final class ProductUser
     }
 
     /**
-     * Ids only: no ':' (it separates the parts, so `7:42` as a customer would let one
-     * user's id pass for another's), no spaces, nothing that is not a string or int.
+     * Cleans one part of the id and checks it is a plain id: letters, digits, dot, dash or
+     * underscore. A colon is not allowed because it separates the parts; otherwise a customer
+     * called "7:42" could make one user's id look like another's.
      *
      * @param mixed $value
      */
     private static function part($value): ?string
     {
+        // Ids often come from the database as numbers.
         if (is_int($value)) {
             $value = (string) $value;
         }
@@ -92,6 +105,7 @@ final class ProductUser
         return $this->person;
     }
 
+    /** The id GAITH files this user's chats under, e.g. "qhse:7:42". */
     public function externalUserId(): string
     {
         return $this->product . ':' . $this->customer . ':' . $this->person;

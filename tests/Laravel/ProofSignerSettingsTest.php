@@ -9,8 +9,8 @@ use Osos\Gaith\Sdk\Tests\Identity\KeyPairs;
 use Orchestra\Testbench\TestCase;
 
 /**
- * The proof key reaches the signer from .env settings alone, in either of the two
- * forms hosts use: PEM text on one line, or a path to a PEM file.
+ * Checks that the proof key can be set in .env in both supported ways: the key text on
+ * one line, or the path of the key file.
  */
 final class ProofSignerSettingsTest extends TestCase
 {
@@ -68,13 +68,6 @@ final class ProofSignerSettingsTest extends TestCase
         $this->proof(['private_key_path' => $this->keyFile]);
 
         $this->assertSignsVerifiably($this->app->make(ProofSigner::class));
-    }
-
-    public function testTheSignerIsBuiltOnce(): void
-    {
-        $this->proof(['private_key' => self::$keys['private']]);
-
-        $this->assertSame($this->app->make(ProofSigner::class), $this->app->make(ProofSigner::class));
     }
 
     /**

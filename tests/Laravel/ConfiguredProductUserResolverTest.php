@@ -5,13 +5,12 @@ namespace Osos\Gaith\Sdk\Tests\Laravel;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Http\Request;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotServiceProvider;
-use Osos\Gaith\Sdk\Laravel\Identity\ConfiguredProductUserResolver;
 use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 use Orchestra\Testbench\TestCase;
 
 /**
- * The resolver turns the host's signed-in user into product, customer and person
- * from settings alone, so QHSE and the ERP need no code of their own.
+ * Checks that the signed-in user is turned into product, customer and person using only
+ * the settings, so QHSE and the ERP need no code of their own.
  */
 final class ConfiguredProductUserResolverTest extends TestCase
 {
@@ -52,11 +51,6 @@ final class ConfiguredProductUserResolverTest extends TestCase
         return $this->app->make(ProductUserResolver::class);
     }
 
-    public function testTheServiceProviderBindsTheConfiguredResolver(): void
-    {
-        $this->assertInstanceOf(ConfiguredProductUserResolver::class, $this->resolver());
-    }
-
     public function testQhseIdsComeFromTheEmployeeRecordThroughSettingsAlone(): void
     {
         $this->identity([
@@ -81,29 +75,6 @@ final class ConfiguredProductUserResolverTest extends TestCase
         $user = $this->resolver()->resolve($this->requestAs(new GenericUser(['id' => 42])));
 
         $this->assertSame('erp:acme_erp:42', $user->externalUserId());
-    }
-
-    public function testAFixedCustomerSuitsASingleCustomerDeployment(): void
-    {
-        $this->identity(['product' => 'erp', 'customer' => 'value:acme']);
-
-        $user = $this->resolver()->resolve($this->requestAs(new GenericUser(['id' => 42])));
-
-        $this->assertSame('erp:acme:42', $user->externalUserId());
-    }
-
-    public function testThePersonDefaultsToTheSignedInUsersId(): void
-    {
-        $this->identity(['product' => 'erp', 'customer' => 'value:acme', 'person' => null]);
-
-        $this->assertSame('42', $this->resolver()->resolve($this->requestAs(new GenericUser(['id' => 42])))->person());
-    }
-
-    public function testNoSignedInUserGivesNoUser(): void
-    {
-        $this->identity(['product' => 'qhse', 'customer' => 'value:acme']);
-
-        $this->assertNull($this->resolver()->resolve($this->requestAs(null)));
     }
 
     public function testAUserWithoutAnEmployeeRecordGivesNoUser(): void

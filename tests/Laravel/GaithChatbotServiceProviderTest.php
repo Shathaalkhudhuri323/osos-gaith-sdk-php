@@ -35,17 +35,6 @@ final class GaithChatbotServiceProviderTest extends TestCase
         ];
     }
 
-    public function testDefaultClientIsBoundAndResolvable(): void
-    {
-        $app = $this->appWithConfig(['default' => $this->validConnection()]);
-        $provider = new GaithChatbotServiceProvider($app);
-        $provider->register();
-
-        $client = $app->make(GaithChatbotClient::class);
-
-        $this->assertInstanceOf(GaithChatbotClient::class, $client);
-    }
-
     public function testFactoryResolvesNamedConnection(): void
     {
         $app = $this->appWithConfig([

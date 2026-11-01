@@ -7,19 +7,23 @@ use Illuminate\Support\Facades\Log;
 use Osos\Gaith\Sdk\Identity\ProductUser;
 
 /**
- * Default resolver, driven by `gaith-chatbot.identity`. Each of `customer` and
- * `person` names where its value comes from:
+ * Works out who is chatting, using only the settings in `gaith-chatbot.identity`, so a
+ * product (QHSE, the ERP...) does not need to write any code for it.
  *
- *   user:<path>     an attribute of the signed-in user; dots follow relations
- *                   (QHSE: user:employee.centralDBCompanyID)
- *   config:<key>    a config value the host sets server-side, e.g. in its tenant
- *                   middleware (ERP: config:database.connections.mysql.database)
- *   value:<text>    a fixed value, for a deployment that serves one customer
+ * The settings say where to find the customer and the person. Each one starts with a
+ * word that tells us where to look:
  *
- * `person` left empty means the signed-in user's auth identifier.
+ *   user:<field>    read a field of the signed-in user. Dots go into related records,
+ *                   e.g. QHSE uses "user:employee.centralDBCompanyID".
+ *   config:<key>    read a Laravel config value that the product sets on the server,
+ *                   e.g. the ERP uses "config:database.connections.mysql.database",
+ *                   which its tenant middleware sets to the customer's database.
+ *   value:<text>    use this fixed value, for an installation with only one customer.
  *
- * There is deliberately no source that reads the request: the customer would then
- * be whatever the browser says it is.
+ * If the person setting is empty, we use the signed-in user's normal id.
+ *
+ * There is on purpose no way to read these values from the request: then the browser
+ * could simply claim to be another customer.
  */
 final class ConfiguredProductUserResolver implements ProductUserResolver
 {
@@ -27,6 +31,8 @@ final class ConfiguredProductUserResolver implements ProductUserResolver
     {
         $settings = (array) config('gaith-chatbot.identity', []);
 
+        // Check the settings first, so a mistake there shows up as a clear error
+        // rather than as every user being refused.
         $product = $settings['product'] ?? null;
         if (!is_string($product) || $product === '') {
             throw new \InvalidArgumentException('gaith-chatbot.identity.product is not set (e.g. "qhse" or "erp")');
@@ -36,7 +42,7 @@ final class ConfiguredProductUserResolver implements ProductUserResolver
 
         $user = $request->user();
         if ($user === null) {
-            return null;
+            return null; // nobody is signed in
         }
 
         $customer = $customerSource === null ? null : self::read($customerSource, $user);
@@ -44,8 +50,8 @@ final class ConfiguredProductUserResolver implements ProductUserResolver
 
         $resolved = ProductUser::create($product, $customer, $person);
         if ($resolved === null) {
-            // Usually a signed-in user with no employee record, or a source pointing at
-            // the wrong field. The values themselves stay out of the log.
+            // This usually means the user has no employee record, or a setting points at the
+            // wrong field. We only log whether each value was found, not the values themselves.
             Log::warning('GAITH chat: could not identify the signed-in user from gaith-chatbot.identity', [
                 'customer_found' => $customer !== null && $customer !== '',
                 'person_found' => $person !== null && $person !== '',
@@ -56,8 +62,11 @@ final class ConfiguredProductUserResolver implements ProductUserResolver
     }
 
     /**
+     * Reads one setting such as "user:employee.centralDBCompanyID" and splits it into
+     * where to look ("user") and what to read ("employee.centralDBCompanyID").
+     *
      * @param mixed $spec
-     * @return array{0: string, 1: string}|null [kind, name]; null only for an unset person
+     * @return array{0: string, 1: string}|null null only when the person setting is left empty
      */
     private static function source($spec, string $setting): ?array
     {
@@ -80,6 +89,8 @@ final class ConfiguredProductUserResolver implements ProductUserResolver
     }
 
     /**
+     * Looks up the value a setting points to.
+     *
      * @param array{0: string, 1: string} $source
      * @param mixed $user
      * @return mixed

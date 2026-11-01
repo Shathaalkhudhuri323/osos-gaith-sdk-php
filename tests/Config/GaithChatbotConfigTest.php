@@ -24,66 +24,29 @@ final class GaithChatbotConfigTest extends TestCase
         $this->assertSame(45, $config->httpTimeout());
     }
 
-    public function testTimeoutDefaultsToNull(): void
-    {
-        $config = new GaithChatbotConfig('https://host.example', self::VALID_CHATBOT_ID, 'key');
-
-        $this->assertNull($config->httpTimeout());
-    }
-
-    public function testEmptyBaseUrlThrows(): void
+    /**
+     * @dataProvider invalidSettings
+     */
+    public function testInvalidSettingsAreRejectedWithAClearMessage(string $baseUrl, string $chatbotId, string $apiKey, ?int $timeout, string $message): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('baseUrl must not be empty');
+        $this->expectExceptionMessage($message);
 
-        new GaithChatbotConfig('', self::VALID_CHATBOT_ID, 'key');
+        new GaithChatbotConfig($baseUrl, $chatbotId, $apiKey, $timeout);
     }
 
-    public function testNonAbsoluteBaseUrlThrows(): void
+    public static function invalidSettings(): array
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('baseUrl must be an absolute http(s) URL');
+        $id = self::VALID_CHATBOT_ID;
 
-        new GaithChatbotConfig('not-a-url', self::VALID_CHATBOT_ID, 'key');
-    }
-
-    public function testNonHttpSchemeThrows(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('baseUrl must be an absolute http(s) URL');
-
-        new GaithChatbotConfig('ftp://host.example', self::VALID_CHATBOT_ID, 'key');
-    }
-
-    public function testEmptyChatbotIdThrows(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('chatbotId must not be empty');
-
-        new GaithChatbotConfig('https://host.example', '', 'key');
-    }
-
-    public function testNonUuidChatbotIdThrows(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('chatbotId must be a valid UUID');
-
-        new GaithChatbotConfig('https://host.example', 'not-a-uuid', 'key');
-    }
-
-    public function testEmptyApiKeyThrows(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('apiKey must not be empty');
-
-        new GaithChatbotConfig('https://host.example', self::VALID_CHATBOT_ID, '');
-    }
-
-    public function testNonPositiveTimeoutThrows(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('httpTimeout must be positive');
-
-        new GaithChatbotConfig('https://host.example', self::VALID_CHATBOT_ID, 'key', 0);
+        return [
+            'empty base URL' => ['', $id, 'key', null, 'baseUrl must not be empty'],
+            'relative base URL' => ['not-a-url', $id, 'key', null, 'baseUrl must be an absolute http(s) URL'],
+            'not http(s)' => ['ftp://host.example', $id, 'key', null, 'baseUrl must be an absolute http(s) URL'],
+            'empty chatbot id' => ['https://host.example', '', 'key', null, 'chatbotId must not be empty'],
+            'chatbot id not a UUID' => ['https://host.example', 'not-a-uuid', 'key', null, 'chatbotId must be a valid UUID'],
+            'empty API key' => ['https://host.example', $id, '', null, 'apiKey must not be empty'],
+            'zero timeout' => ['https://host.example', $id, 'key', 0, 'httpTimeout must be positive'],
+        ];
     }
 }

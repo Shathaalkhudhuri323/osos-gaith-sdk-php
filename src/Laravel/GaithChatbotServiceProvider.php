@@ -29,7 +29,8 @@ final class GaithChatbotServiceProvider extends ServiceProvider
             return $app->make($app['config']->get('gaith-chatbot.identity.resolver', ConfiguredProductUserResolver::class));
         });
 
-        // Lazy, so a host that has not set its key yet only fails where a proof is needed.
+        // Created only when first needed, so a product that has not set its key yet
+        // only gets an error on the routes that actually need a proof.
         $this->app->singleton(ProofSigner::class, function ($app) {
             return ProofSignerFactory::make((array) $app['config']->get('gaith-chatbot.proof', []));
         });
