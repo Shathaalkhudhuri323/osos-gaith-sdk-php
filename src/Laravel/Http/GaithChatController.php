@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Osos\Gaith\Sdk\Attachments\AttachmentTypes;
@@ -74,6 +75,12 @@ final class GaithChatController extends Controller
 
     /** How long a failed status check is remembered, whatever the normal cache time. */
     private const STATUS_FAILURE_CACHE_SECONDS = 10;
+
+    /** A reply's stream slot expires this long after it was last renewed. */
+    private const STREAM_SLOT_SECONDS = 60;
+
+    /** How often a streaming reply renews its slot; well inside STREAM_SLOT_SECONDS. */
+    private const STREAM_SLOT_RENEW_SECONDS = 15;
 
     public function __construct(Container $app, ProductUserResolver $users)
     {
@@ -338,8 +345,18 @@ final class GaithChatController extends Controller
         $client = $this->client();
         $message = $validated['message'];
 
-        $response = new StreamedResponse(function () use ($client, $user, $message, $options) {
-            $this->relay($client, $user, $message, $options);
+        $slot = $this->takeStreamSlot($user);
+        if ($slot === null) {
+            // Refused before anything is sent to GAITH, so it costs no turn.
+            return new JsonResponse(['code' => 'too_many_streams'], 429, ['Retry-After' => '15']);
+        }
+
+        $response = new StreamedResponse(function () use ($client, $user, $message, $options, $slot) {
+            try {
+                $this->relay($client, $user, $message, $options, $slot);
+            } finally {
+                $this->releaseStreamSlot($slot);
+            }
         });
 
         $response->headers->set('Content-Type', 'text/event-stream');
@@ -469,12 +486,16 @@ final class GaithChatController extends Controller
      * Any failure is reported as a terminal error frame rather than a dropped
      * socket, so the widget always has something definite to render.
      */
-    private function relay(GaithChatbotClient $client, GaithUser $user, string $message, array $options): void
+    private function relay(GaithChatbotClient $client, GaithUser $user, string $message, array $options, string $slot): void
     {
-        // The turn may legitimately run for minutes (tool calls); the resume window
-        // inside the SDK, not PHP's time limit, bounds it.
+        // The turn may legitimately run for a long time (tool calls, workflows), so
+        // PHP's own limit is lifted and `widget.max_reply_seconds` bounds it instead.
         @set_time_limit(0);
         ignore_user_abort(false);
+
+        $maxSeconds = max(0, (int) config('gaith-chatbot.widget.max_reply_seconds', 3600));
+        $startedAt = Carbon::now()->getTimestamp();
+        $renewedAt = $startedAt;
 
         try {
             foreach ($client->streamChat($user, $message, $options) as $event) {
@@ -490,6 +511,23 @@ final class GaithChatController extends Controller
                 if (connection_aborted()) {
                     return; // leaving the loop closes the upstream stream via the SDK's finally
                 }
+
+                // Heartbeats arrive about every 15 s, so these checks run even while
+                // GAITH is silent inside a long tool call.
+                $now = Carbon::now()->getTimestamp();
+                if ($maxSeconds > 0 && $now - $startedAt >= $maxSeconds) {
+                    Log::warning('GAITH chat turn stopped at the reply time limit', [
+                        'trace_id' => $this->traceId,
+                        'max_reply_seconds' => $maxSeconds,
+                    ]);
+                    $this->emit('error', ['code' => 'reply_timeout', 'message' => 'The assistant took too long to reply.']);
+
+                    return;
+                }
+                if ($now - $renewedAt >= self::STREAM_SLOT_RENEW_SECONDS) {
+                    Cache::put($slot, $this->traceId, self::STREAM_SLOT_SECONDS);
+                    $renewedAt = $now;
+                }
             }
         } catch (StreamDroppedException $e) {
             $this->fail('stream_dropped', $e);
@@ -499,6 +537,36 @@ final class GaithChatController extends Controller
             $this->fail('gaith_error', $e);
         } catch (\Throwable $e) {
             $this->fail('internal_error', $e);
+        }
+    }
+
+    /**
+     * Each open reply holds one of the host's PHP workers, so one user may hold at most
+     * `widget.max_streams_per_user` of them. A slot lives in the cache for a minute and
+     * is renewed while its reply streams, so a worker that dies frees it within a
+     * minute instead of blocking the user for the whole reply time limit.
+     *
+     * @return string|null the slot's cache key, or null when every slot is taken
+     */
+    private function takeStreamSlot(GaithUser $user): ?string
+    {
+        $max = max(1, (int) config('gaith-chatbot.widget.max_streams_per_user', 2));
+        for ($i = 0; $i < $max; $i++) {
+            $key = 'gaith-chat:stream:' . $user->id() . ':' . $i;
+            // add() only writes when the key is absent, so two requests cannot take one slot.
+            if (Cache::add($key, $this->traceId, self::STREAM_SLOT_SECONDS)) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    private function releaseStreamSlot(string $key): void
+    {
+        // Only our own: after an expiry the slot may already belong to another reply.
+        if (Cache::get($key) === $this->traceId) {
+            Cache::forget($key);
         }
     }
 

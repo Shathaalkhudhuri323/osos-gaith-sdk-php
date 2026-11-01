@@ -126,5 +126,14 @@ return [
         // page loads do not each call GAITH. Also the longest a switch-off takes to show.
         // 0 asks GAITH on every page load. Failures are kept for at most 10 s.
         'status_cache_seconds' => (int) env('GAITH_CHAT_WIDGET_STATUS_CACHE_SECONDS', 60),
+
+        // Each open reply holds one PHP worker. One user may have this many streaming at once;
+        // more get 429 too_many_streams before anything reaches GAITH. Needs a cache store with
+        // atomic add (redis, memcached, database, array), not the file store.
+        'max_streams_per_user' => (int) env('GAITH_CHAT_WIDGET_MAX_STREAMS_PER_USER', 2),
+
+        // Longest one reply may stream, in seconds (0 = no limit here). GAITH's own per-chatbot
+        // limit ("Max seconds per reply", at most 600 today) still applies and is usually shorter.
+        'max_reply_seconds' => (int) env('GAITH_CHAT_WIDGET_MAX_REPLY_SECONDS', 3600),
     ],
 ];

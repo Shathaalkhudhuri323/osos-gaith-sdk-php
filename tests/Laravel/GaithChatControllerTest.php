@@ -5,6 +5,8 @@ namespace Osos\Gaith\Sdk\Tests\Laravel;
 use GuzzleHttp\Psr7\Request;
 use Illuminate\Auth\GenericUser;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Osos\Gaith\Sdk\Config\GaithUser;
 use Osos\Gaith\Sdk\Exceptions\GaithAuthException;
@@ -271,6 +273,113 @@ final class GaithChatControllerTest extends TestCase
                 throw new \GuzzleHttp\Exception\ConnectException('connection refused', new Request('GET', 'https://gaith.invalid/access'));
             }],
         ];
+    }
+
+    private const SLOT = 'gaith-chat:stream:erp:acme:42:';
+
+    /**
+     * A GAITH stream that runs $onRead before each chunk, e.g. to move the clock.
+     *
+     * @param string[] $chunks
+     */
+    private function bindTimedStream(array $chunks, callable $onRead): void
+    {
+        $this->bindHandle(new class ($chunks, $onRead) implements StreamHandle {
+            private $chunks;
+            private $onRead;
+            private $i = 0;
+            public function __construct(array $chunks, callable $onRead) { $this->chunks = $chunks; $this->onRead = $onRead; }
+            public function read(): ?string
+            {
+                ($this->onRead)($this->i);
+                return $this->chunks[$this->i++] ?? null;
+            }
+            public function close(): void {}
+        });
+    }
+
+    public function testAThirdOpenReplyForOneUserIsRefusedBeforeReachingGaith(): void
+    {
+        Cache::add(self::SLOT . '0', 'other-reply', 60);
+        Cache::add(self::SLOT . '1', 'other-reply', 60);
+        $this->signIn(42);
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+
+        $response = $this->postJson('/api/gaith/stream', ['message' => 'hello']);
+
+        $response->assertStatus(429)->assertExactJson(['code' => 'too_many_streams']);
+        $this->assertSame('15', $response->headers->get('Retry-After'));
+        $this->assertNull($this->sentChatBody);
+    }
+
+    public function testOtherUsersAreNotLimitedByOneUsersReplies(): void
+    {
+        Cache::add(self::SLOT . '0', 'other-reply', 60);
+        Cache::add(self::SLOT . '1', 'other-reply', 60);
+        $this->signIn(43);
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+
+        $this->post('/api/gaith/stream', ['message' => 'hello'])->assertStatus(200)->streamedContent();
+
+        $this->assertNotNull($this->sentChatBody);
+    }
+
+    public function testAFinishedReplyGivesItsSlotBack(): void
+    {
+        $this->signIn(42);
+        for ($turn = 0; $turn < 3; $turn++) { // more turns than slots, one after another
+            $this->bindStreaming(self::SSE_HAPPY_PATH);
+            $this->post('/api/gaith/stream', ['message' => 'hello'])->assertStatus(200)->streamedContent();
+        }
+
+        $this->assertFalse(Cache::has(self::SLOT . '0'));
+        $this->assertFalse(Cache::has(self::SLOT . '1'));
+    }
+
+    public function testASlotLeftByADeadWorkerFreesItselfWithinAMinute(): void
+    {
+        Cache::add(self::SLOT . '0', 'dead-worker', 60);
+        Cache::add(self::SLOT . '1', 'dead-worker', 60);
+        $this->signIn(42);
+        $this->travel(61)->seconds();
+        $this->bindStreaming(self::SSE_HAPPY_PATH);
+
+        $this->post('/api/gaith/stream', ['message' => 'hello'])->assertStatus(200)->streamedContent();
+    }
+
+    public function testALongReplyKeepsItsSlotWhileItStreams(): void
+    {
+        $this->signIn(42);
+        $held = [];
+        $this->bindTimedStream(self::SSE_HAPPY_PATH, function (int $i) use (&$held) {
+            if ($i > 0) {
+                Carbon::setTestNow(Carbon::now()->addSeconds(40)); // 120 s in all, twice the slot's life
+            }
+            $held[] = Cache::get(self::SLOT . '0');
+        });
+
+        $this->post('/api/gaith/stream', ['message' => 'hello'])->streamedContent();
+
+        $this->assertNotContains(null, $held, 'the slot expired while its reply was still streaming');
+        $this->assertCount(1, array_unique($held));
+    }
+
+    public function testAReplyIsStoppedAtTheReplyTimeLimit(): void
+    {
+        $this->app['config']->set('gaith-chatbot.widget.max_reply_seconds', 30);
+        $this->signIn(42);
+        $this->bindTimedStream(self::SSE_HAPPY_PATH, function (int $i) {
+            if ($i === 2) {
+                Carbon::setTestNow(Carbon::now()->addSeconds(31));
+            }
+        });
+
+        $body = $this->post('/api/gaith/stream', ['message' => 'hello'])->streamedContent();
+
+        $this->assertStringContainsString("event: token\ndata: {\"content\":\"Hel\"}", $body);
+        $this->assertStringContainsString('"code":"reply_timeout"', $body);
+        $this->assertStringNotContainsString('event: done', $body);
+        $this->assertFalse(Cache::has(self::SLOT . '0'), 'a stopped reply must give its slot back');
     }
 
     public function testStatusAsksGaithOncePerCustomerWithinTheCacheTime(): void

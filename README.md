@@ -190,6 +190,20 @@ this app's log (`GAITH chat turn started` and every failure, as `trace_id`), and
 in the chat response's `X-Trace-ID` header, for users to quote to support. Messages, proofs and
 tokens are never logged.
 
+**Long replies and PHP workers (for DevOps):** each open reply keeps one PHP worker busy for as long
+as it streams, and a reply may run long when the chatbot calls tools or workflows.
+
+- One user may have `GAITH_CHAT_WIDGET_MAX_STREAMS_PER_USER` replies open at once (default 2); more
+  get `429 too_many_streams` before anything reaches GAITH. The count lives in the cache, so use a
+  store with atomic writes (redis, memcached, database), not the file store.
+- A reply is stopped after `GAITH_CHAT_WIDGET_MAX_REPLY_SECONDS` (default 3600). GAITH's own
+  per-chatbot limit still applies and is usually shorter (at most 600 s today).
+- Give the SDK routes their own PHP-FPM pool, sized for the number of replies you expect at once,
+  so long chats cannot use up the workers QHSE's normal pages need.
+- Proxies in front (nginx `proxy_read_timeout`, load balancers) must allow a long response. Heartbeats
+  arrive about every 15 s, so an idle timeout above 30 s is enough; a cap on total response time must
+  be above the reply time limit.
+
 **Behind nginx:** responses already send `X-Accel-Buffering: no`. Make sure no other proxy buffers or
 times out `text/event-stream` responses. Heartbeats are relayed every ~15s.
 
