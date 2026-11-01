@@ -13,6 +13,7 @@ Route::group([
     'middleware' => config('gaith-chatbot.widget.middleware', ['api', 'auth']),
 ], function () {
     Route::get('config', [GaithChatController::class, 'config'])->name('gaith-chat.config');
+    Route::get('status', [GaithChatController::class, 'status'])->name('gaith-chat.status');
     Route::post('stream', [GaithChatController::class, 'stream'])->name('gaith-chat.stream');
     Route::post('attachments', [GaithChatController::class, 'upload'])->name('gaith-chat.upload');
     Route::get('conversations/{conversation}/messages', [GaithChatController::class, 'messages'])

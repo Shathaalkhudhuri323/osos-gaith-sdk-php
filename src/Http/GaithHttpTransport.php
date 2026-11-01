@@ -47,20 +47,30 @@ class GaithHttpTransport
         return $this->config->baseUrl() . '/api/v1/chatbots/' . $this->config->chatbotId() . '/';
     }
 
+    /** The chatbot every request goes to, and so the audience of any identity proof sent with one. */
+    public function chatbotId(): string
+    {
+        return $this->config->chatbotId();
+    }
+
     /**
+     * @param array<string, string> $extraHeaders
      * @return array<string, mixed>
      */
-    public function get(string $path, string $queryString = ''): array
+    public function get(string $path, string $queryString = '', array $extraHeaders = []): array
     {
-        $request = $this->buildRequest('GET', $path, $queryString);
+        $request = $this->buildRequest('GET', $path, $queryString, $extraHeaders);
         $response = $this->send($request);
 
         return $this->decodeJson($response);
     }
 
-    public function delete(string $path, string $queryString = ''): void
+    /**
+     * @param array<string, string> $extraHeaders
+     */
+    public function delete(string $path, string $queryString = '', array $extraHeaders = []): void
     {
-        $request = $this->buildRequest('DELETE', $path, $queryString);
+        $request = $this->buildRequest('DELETE', $path, $queryString, $extraHeaders);
         $this->send($request);
     }
 
@@ -91,8 +101,9 @@ class GaithHttpTransport
      * @param string|null $mediaType The file part's Content-Type. GAITH stores and validates
      *                               the upload by it; when null the builder guesses from the
      *                               filename's extension, and a name without one is sent untyped.
+     * @param array<string, string> $extraHeaders
      */
-    public function postMultipart(string $path, string $fileContents, string $filename, string $externalUserId, ?string $mediaType = null): array
+    public function postMultipart(string $path, string $fileContents, string $filename, string $externalUserId, ?string $mediaType = null, array $extraHeaders = []): array
     {
         $builder = new \Http\Message\MultipartStream\MultipartStreamBuilder($this->streamFactory);
         $options = ['filename' => $filename];
@@ -103,7 +114,7 @@ class GaithHttpTransport
         $builder->addResource('external_user_id', $externalUserId);
 
         $boundary = $builder->getBoundary();
-        $request = $this->buildRequest('POST', $path, '')
+        $request = $this->buildRequest('POST', $path, '', $extraHeaders)
             ->withHeader('Content-Type', 'multipart/form-data; boundary=' . $boundary)
             ->withBody($builder->build());
 
@@ -112,18 +123,23 @@ class GaithHttpTransport
         return $this->decodeJson($response);
     }
 
-    public function getRaw(string $path, string $queryString = ''): \Psr\Http\Message\StreamInterface
+    /**
+     * @param array<string, string> $extraHeaders
+     */
+    public function getRaw(string $path, string $queryString = '', array $extraHeaders = []): \Psr\Http\Message\StreamInterface
     {
-        return $this->getRawResponse($path, $queryString)->getBody();
+        return $this->getRawResponse($path, $queryString, $extraHeaders)->getBody();
     }
 
     /**
      * Like getRaw(), but keeps the response headers (Content-Type, Content-Disposition)
      * for callers that serve the bytes onward.
+     *
+     * @param array<string, string> $extraHeaders
      */
-    public function getRawResponse(string $path, string $queryString = ''): ResponseInterface
+    public function getRawResponse(string $path, string $queryString = '', array $extraHeaders = []): ResponseInterface
     {
-        return $this->send($this->buildRequest('GET', $path, $queryString));
+        return $this->send($this->buildRequest('GET', $path, $queryString, $extraHeaders));
     }
 
     /**
@@ -149,17 +165,26 @@ class GaithHttpTransport
         return $request;
     }
 
-    private function buildRequest(string $method, string $path, string $queryString): RequestInterface
+    /**
+     * @param array<string, string> $extraHeaders
+     */
+    private function buildRequest(string $method, string $path, string $queryString, array $extraHeaders = []): RequestInterface
     {
         $uri = $this->baseUri() . ltrim($path, '/');
         if ($queryString !== '') {
             $uri .= '?' . $queryString;
         }
 
-        return $this->requestFactory
+        $request = $this->requestFactory
             ->createRequest($method, $uri)
             ->withHeader('X-API-Key', $this->config->apiKey())
             ->withHeader('Accept', 'application/json');
+
+        foreach ($extraHeaders as $name => $value) {
+            $request = $request->withHeader($name, $value);
+        }
+
+        return $request;
     }
 
     private function send(RequestInterface $request): ResponseInterface

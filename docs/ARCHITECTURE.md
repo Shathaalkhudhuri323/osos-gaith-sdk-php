@@ -328,7 +328,9 @@ That pairing is the main reason both halves live in this repo rather than an npm
   (`iss` product, `sub` person, `tenant` customer, `aud` chatbot, one-use `jti`) that GAITH verifies
   with the public key on the chatbot's API key. Only signing happens here, so no JWT library: the
   risky half, verification, lives in GAITH. The key is held as an OpenSSL handle and hidden from
-  dumps, and setting errors name the setting, never the key.
+  dumps, and setting errors name the setting, never the key. The widget routes attach it per HTTP
+  request in `X-Gaith-Identity-Proof` (`GaithUser::withProof`), so a resumed stream or each history
+  page gets its own `jti`, and its audience is the chatbot of the client actually sending it.
 - **Routes are off by default** (`widget.enabled`). Enabling them is a security decision: the host must
   first put its own auth middleware in `widget.middleware`.
 - **Web Component, prebuilt ES2017 bundle.** Both target apps run Angular 5 / TypeScript 2.9, which

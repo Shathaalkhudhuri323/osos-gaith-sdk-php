@@ -18,6 +18,7 @@ use Osos\Gaith\Sdk\Exceptions\GaithNotFoundException;
 use Osos\Gaith\Sdk\Exceptions\GaithRateLimitException;
 use Osos\Gaith\Sdk\Exceptions\GaithValidationException;
 use Osos\Gaith\Sdk\GaithChatbotClient;
+use Osos\Gaith\Sdk\Identity\ProofSigner;
 use Osos\Gaith\Sdk\Laravel\GaithChatbotClientFactory;
 use Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver;
 use Osos\Gaith\Sdk\Models\FileRef;
@@ -35,6 +36,7 @@ use Osos\Gaith\Sdk\Streaming\StreamDroppedException;
 use Osos\Gaith\Sdk\Streaming\TokenEvent;
 use Osos\Gaith\Sdk\Streaming\ToolCallEvent;
 use Osos\Gaith\Sdk\Streaming\ToolResultEvent;
+use Psr\Http\Client\ClientExceptionInterface;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -340,6 +342,32 @@ final class GaithChatController extends Controller
     }
 
     /**
+     * Whether to show the chat box at all: is the chatbot switched on for this user's
+     * customer? GAITH holds the switch, so the host never keeps a list of its own.
+     *
+     * Anything short of GAITH's clear yes - a refusal, an error, GAITH out of reach -
+     * answers off: the chat could not work then anyway, and a hidden chat box is the
+     * safe way to be wrong. Failures are logged so an admin can see why it is hidden.
+     */
+    public function status(Request $request): JsonResponse
+    {
+        $user = $this->userOrAbort($request);
+
+        try {
+            $enabled = $this->client()->isEnabledFor($user);
+        } catch (GaithApiException | ClientExceptionInterface $e) {
+            $this->logFailure('status_failed', $e);
+            $enabled = false;
+        }
+
+        $response = new JsonResponse(['enabled' => $enabled]);
+        // Per user, and a switch-off must take effect on the next page load.
+        $response->headers->set('Cache-Control', 'no-store, private');
+
+        return $response;
+    }
+
+    /**
      * The conversation's messages, oldest first, so the widget can restore the
      * thread after a page reload. GAITH is the system of record for history.
      */
@@ -446,7 +474,15 @@ final class GaithChatController extends Controller
             abort(401);
         }
 
-        return GaithUser::for($user->externalUserId());
+        // Resolved only once the user is known, and before anything is sent, so missing
+        // proof settings stop the request here instead of reaching GAITH without a proof.
+        $signer = $this->app->make(ProofSigner::class);
+
+        return GaithUser::for($user->externalUserId())->withProof(
+            function (string $chatbotId) use ($signer, $user): string {
+                return $signer->sign($user, $chatbotId);
+            }
+        );
     }
 
     private function client(): GaithChatbotClient

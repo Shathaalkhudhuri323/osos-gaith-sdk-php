@@ -130,11 +130,12 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
    `post_max_size` to at least 20M (PHP defaults to 2M), and the web server's body limit (nginx
    `client_max_body_size`).
 
-This registers five routes:
+This registers six routes:
 
 | Route | Purpose |
 |---|---|
 | `GET {prefix}/config` | Per-product settings (colours, allowed image origins, attachment limits) |
+| `GET {prefix}/status` | `{enabled}`: is the chatbot switched on for this user's customer? Asks GAITH (`GET access`); anything but a clear yes is `false` |
 | `POST {prefix}/attachments` (multipart `file`) | Uploads one attached file to GAITH, returns its `artifact_id` |
 | `POST {prefix}/stream` `{message, conversation_id?, attachments?}` | One chat turn, streamed back as SSE |
 | `GET {prefix}/conversations/{id}/messages` | History, including each message's files |
@@ -168,8 +169,8 @@ employee record) gets a 401; a missing or malformed setting is an error, not a 4
 product whose ids do not fit these sources names its own `Osos\Gaith\Sdk\Laravel\Identity\ProductUserResolver`
 in `identity.resolver`.
 
-**Identity proof key:** with every chat request the SDK will send GAITH a signed proof of who is
-chatting: an RS256 JWT with `iss` (product), `sub` (person), `tenant` (customer), `aud` (chatbot id),
+**Identity proof key:** with every request it makes for a user (chat, history, uploads, files) the SDK
+sends GAITH a fresh signed proof of who is chatting, in the `X-Gaith-Identity-Proof` header: an RS256 JWT with `iss` (product), `sub` (person), `tenant` (customer), `aud` (chatbot id),
 `iat`, `exp` (2 minutes) and a one-use `jti`. Make one key pair per environment:
 
 ```bash
@@ -180,7 +181,8 @@ openssl pkey -in gaith-proof.pem -pubout -out gaith-proof.pub.pem
 The private key goes into the host's secret store, never into Git, email or chat; set
 `GAITH_PROOF_PRIVATE_KEY_PATH` to its file (or `GAITH_PROOF_PRIVATE_KEY` to its text, newlines as `\n`)
 and `GAITH_PROOF_KEY_ID` to a name such as `qhse-prod-1`. The public key and that name are registered
-on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default).
+on the chatbot's API key in GAITH. Needs PHP's `openssl` extension (on by default). Without a key
+the widget routes answer 500 and send nothing to GAITH, rather than chat without a proof.
 
 **Behind nginx:** responses already send `X-Accel-Buffering: no`. Make sure no other proxy buffers or
 times out `text/event-stream` responses. Heartbeats are relayed every ~15s.

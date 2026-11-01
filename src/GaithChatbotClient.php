@@ -44,6 +44,18 @@ final class GaithChatbotClient
     }
 
     /**
+     * Whether this chatbot is switched on for the user's customer. GAITH keeps that
+     * list; the user comes from the proof the user carries. Only an explicit `true`
+     * counts, so a malformed answer reads as off.
+     */
+    public function isEnabledFor(GaithUser $user): bool
+    {
+        $answer = $this->transport->get('access', '', $this->proof($user));
+
+        return ($answer['enabled'] ?? null) === true;
+    }
+
+    /**
      * @return Conversation[]
      */
     public function listConversations(GaithUser $user, ConversationListOptions $options): array
@@ -56,7 +68,7 @@ final class GaithChatbotClient
             ->add('offset', $options->offset())
             ->toString();
 
-        $rows = $this->transport->get('conversations', $query);
+        $rows = $this->transport->get('conversations', $query, $this->proof($user));
 
         return array_map(static function (array $row): Conversation {
             return Conversation::fromArray($row);
@@ -67,7 +79,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        return Conversation::fromArray($this->transport->get('conversations/' . $conversationId, $query));
+        return Conversation::fromArray($this->transport->get('conversations/' . $conversationId, $query, $this->proof($user)));
     }
 
     /**
@@ -81,7 +93,7 @@ final class GaithChatbotClient
             ->add('limit', $options->limit())
             ->toString();
 
-        $rows = $this->transport->get('conversations/' . $conversationId . '/messages', $query);
+        $rows = $this->transport->get('conversations/' . $conversationId . '/messages', $query, $this->proof($user));
 
         return array_map(static function (array $row): ChatMessage {
             return ChatMessage::fromArray($row);
@@ -92,7 +104,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        $this->transport->delete('conversations/' . $conversationId, $query);
+        $this->transport->delete('conversations/' . $conversationId, $query, $this->proof($user));
     }
 
     /**
@@ -114,7 +126,8 @@ final class GaithChatbotClient
             $contents,
             $filename ?? basename($filePath),
             $user->id(),
-            $mediaType
+            $mediaType,
+            $this->proof($user)
         );
 
         return AttachmentUpload::fromArray($result);
@@ -124,7 +137,7 @@ final class GaithChatbotClient
     {
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
-        return $this->transport->getRaw('attachments/' . $artifactId, $query);
+        return $this->transport->getRaw('attachments/' . $artifactId, $query, $this->proof($user));
     }
 
     /**
@@ -137,7 +150,7 @@ final class GaithChatbotClient
         $query = (new QueryBuilder())->add('external_user_id', $user->id())->toString();
 
         return AttachmentDownload::fromResponse(
-            $this->transport->getRawResponse('attachments/' . rawurlencode($artifactId), $query)
+            $this->transport->getRawResponse('attachments/' . rawurlencode($artifactId), $query, $this->proof($user))
         );
     }
 
@@ -212,7 +225,8 @@ final class GaithChatbotClient
             'external_user_id' => $user->id(),
         ]);
 
-        $headers = [];
+        // Built per attempt, so a resumed stream carries a fresh proof.
+        $headers = $this->proof($user);
         if ($streamId !== null) {
             $headers['X-Stream-Id'] = $streamId;
             if ($lastEventId !== null) {
@@ -221,5 +235,13 @@ final class GaithChatbotClient
         }
 
         return $this->transport->buildStreamingRequest('chat', $body, $headers);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function proof(GaithUser $user): array
+    {
+        return $user->proofHeaders($this->transport->chatbotId());
     }
 }
