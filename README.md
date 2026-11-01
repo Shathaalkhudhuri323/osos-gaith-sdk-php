@@ -109,10 +109,24 @@ on the server. See [ARCHITECTURE.md §11](docs/ARCHITECTURE.md) for the design.
 5. Optional: set this product's colours with `GAITH_CHAT_WIDGET_PRIMARY_COLOR` / `GAITH_CHAT_WIDGET_TEXT_COLOR`
    (default blue `#1f6feb` / white), or edit `widget.theme` in the published config.
 
+   Optional: `GAITH_CHAT_WIDGET_PRIVACY_URL` links the lock in the chat header to this product's data
+   protection policy: hovering it shows "GAITH data protection applies to this chat", with the name linking to
+   the policy (an `https://` URL or a path such as `/privacy`). Without it the note shows without a link.
+
+   Voice input: the mic button dictates into the input box, words appearing as they are spoken; the
+   user still presses send. It uses the browser's own speech recognition (Chrome, Edge, Safari; hidden
+   in Firefox), so **the audio goes to the browser vendor's speech service** (Google, Microsoft or
+   Apple), not to your app or GAITH. Set `GAITH_CHAT_WIDGET_VOICE=false` where your data policy does not
+   allow that. It needs HTTPS (or localhost), and an iframe host needs `allow="microphone"`.
+
 6. Optional: `GAITH_CHAT_WIDGET_IMAGE_ORIGINS` lists extra origins that markdown images may load
    from, e.g. an MCP server that returns image links. Images from anywhere else render as plain links.
-7. Users can attach files (PDF, PNG, JPEG, DOCX up to 20 MB, 8 per message by default; `widget.attachments`
-   in the config, `GAITH_CHAT_WIDGET_ATTACHMENTS=false` to turn off). Raise PHP's `upload_max_filesize` and
+7. Users can attach files (up to 20 MB, 8 per message by default; `widget.attachments` in the config,
+   `GAITH_CHAT_WIDGET_ATTACHMENTS=false` to turn off). `GAITH_CHAT_WIDGET_ATTACHMENT_TYPES` picks the types,
+   as extensions: default `pdf,docx,png,jpg,jpeg`, which is what GAITH's chat upload accepts today. The SDK
+   also handles `doc, xls, xlsx, csv, md, txt, webp, bmp, tif, tiff`; only enable those once GAITH accepts them,
+   or users can pick files that GAITH then refuses. Each file is checked by its contents (a program renamed
+   to `.csv` is refused), needing PHP's `fileinfo` extension (on by default). Raise PHP's `upload_max_filesize` and
    `post_max_size` to at least 20M (PHP defaults to 2M), and the web server's body limit (nginx
    `client_max_body_size`).
 
@@ -179,12 +193,17 @@ chat.options = {
 | `bot-name` | Header title |
 | `launcher-icon` | Optional image URL for the floating button |
 
-Methods: `open()`, `close()`, `reset()`, `send(text)`. Event: `gaith-chat:error` (`detail.code`).
+Methods: `open()`, `close()`, `reset()`, `send(text)`. Events: `gaith-chat:error` (`detail.code`), and
+`gaith-chat:history` when the menu at the top left is clicked (a placeholder until chat history ships).
 
 **Colours** come from the backend `.env` (see above), so each product is branded without a frontend
 change. Precedence: page CSS > backend `.env`/config > built-in blue. Page-level overrides and layout
 use CSS custom properties: `gaith-chat { --gaith-chat-primary: #E33A33; --gaith-chat-bottom: 66px; }`
-(also `--gaith-chat-on-primary`, `--gaith-chat-side`, `--gaith-chat-z-index`, `--gaith-chat-font`).
+(also `--gaith-chat-on-primary`, `--gaith-chat-side`, `--gaith-chat-z-index`, `--gaith-chat-font`, and
+`--gaith-chat-width` for the side pane, default `420px`).
+
+**Layout:** the chat opens as a full-height pane on the right edge of the page (left in Arabic), over
+the page content, like Copilot in Office. The launcher button hides while the pane is open.
 
 **Angular (including Angular 5):** add `schemas: [CUSTOM_ELEMENTS_SCHEMA]` to the module that uses the
 tag. Set `getHeaders` once, e.g. in `AppComponent.ngAfterViewInit`. No npm install or Angular build

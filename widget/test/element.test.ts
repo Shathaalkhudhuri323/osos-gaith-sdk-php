@@ -28,7 +28,7 @@ describe('<gaith-chat>', () => {
 
     expect(bubbles(el)).toEqual(['How can I help you today?']);
     expect(shadow(el).querySelector('.message.welcome')).not.toBeNull();
-    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(2);
+    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(4);
   });
 
   it('shows the configured welcome text and starter options before the first message', () => {
@@ -40,23 +40,55 @@ describe('<gaith-chat>', () => {
     expect(shadow(el).querySelector('.option')!.textContent).toBe('Show approvals');
   });
 
-  it('shows the example prompt and GAITH branding above the composer', () => {
+  it('shows the example prompt and a Powered by GAITH footer under the input', () => {
     routeFetch({});
     const el = mount();
 
     expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).placeholder)
       .toBe('Example: “Show my pending approvals”');
     expect(shadow(el).querySelector('.powered')!.textContent).toBe('Powered by GAITH');
-    expect(shadow(el).querySelector('.powered svg')).not.toBeNull();
+    expect(shadow(el).querySelector('.composer-box + .powered')).not.toBeNull();
   });
 
-  it('keeps only refresh and exit controls in the visual header', () => {
+  it('keeps only the history menu, data protection, refresh and exit controls in the header', () => {
     routeFetch({});
     const el = mount();
 
     expect(shadow(el).querySelector('.avatar')).toBeNull();
     expect(shadow(el).querySelector('.heading')).toBeNull();
-    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(2);
+    expect(shadow(el).querySelectorAll('.header .action')).toHaveLength(4);
+  });
+
+  it('puts the chat history menu first in the header and tells the host when it is clicked', () => {
+    routeFetch({});
+    const el = mount();
+    const clicks: string[] = [];
+    el.addEventListener('gaith-chat:history', (e) => clicks.push(e.type));
+
+    const menu = shadow(el).querySelector('.header .action') as HTMLButtonElement;
+    expect(menu.classList.contains('menu')).toBe(true);
+    expect(menu.getAttribute('aria-label')).toBe('Chat history');
+    menu.click();
+
+    expect(clicks).toEqual(['gaith-chat:history']);
+  });
+
+  it('labels controls with the shared hover card instead of the browser tooltip', () => {
+    routeFetch({});
+    const el = mount();
+    (el as any).open();
+    const reset = shadow(el).querySelector('.reset') as HTMLButtonElement;
+    const tip = shadow(el).querySelector('.tip') as HTMLElement;
+
+    expect(reset.hasAttribute('title')).toBe(false);
+    expect(reset.getAttribute('aria-label')).toBe('New conversation');
+
+    reset.dispatchEvent(new Event('pointerover', { bubbles: true, composed: true }));
+    expect(tip.textContent).toBe('New conversation');
+    expect(tip.classList.contains('show')).toBe(true);
+
+    reset.dispatchEvent(new Event('pointerout', { bubbles: true, composed: true }));
+    expect(tip.classList.contains('show')).toBe(false);
   });
 
   it('allows each host product to provide its own example prompt', () => {
@@ -89,13 +121,35 @@ describe('<gaith-chat>', () => {
 
     el.send('hello');
     await flush(20);
-    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).disabled).toBe(true);
+    const input = shadow(el).querySelector('.input') as HTMLTextAreaElement;
+    const send = shadow(el).querySelector('.send') as HTMLButtonElement;
+    input.value = 'next question';
+    input.dispatchEvent(new Event('input'));
+    expect(send.disabled).toBe(true);
 
     el.remove();
     document.body.appendChild(el);
 
     expect(shadow(el).querySelector('.typing')).toBeNull();
-    expect((shadow(el).querySelector('.input') as HTMLTextAreaElement).disabled).toBe(false);
+    expect(send.disabled).toBe(false);
+  });
+
+  it('lets the user type the next message while a reply streams, but not send it yet', async () => {
+    const hangingStream = () => new Response(new ReadableStream<Uint8Array>({
+      start() { /* remains open */ },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    const fetchMock = routeFetch({ '/stream': hangingStream });
+    const el = mount() as any;
+    el.send('hello');
+    await flush(20);
+
+    const input = shadow(el).querySelector('.input') as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    input.value = 'and tomorrow?';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+    expect(input.value).toBe('and tomorrow?'); // kept, not sent
+    expect(urls(fetchMock).filter((u) => u.endsWith('/stream'))).toHaveLength(1);
   });
 
   it('uses getHeaders even when the host set it before the element was defined', async () => {
@@ -179,6 +233,42 @@ describe('<gaith-chat>', () => {
     expect(container(el).style.getPropertyValue('--gaith-chat-theme-primary')).toBe('#E33A33');
     expect(container(el).style.getPropertyValue('--gaith-chat-theme-on-primary')).toBe('#ffffff');
     expect(container(el).classList.contains('pending')).toBe(false);
+  });
+
+  it('says GAITH data protection applies, linking to the product policy from the backend config', async () => {
+    routeFetch({ '/config': () => json({ theme: {}, privacy_url: 'https://osos.om/privacy' }) });
+
+    const el = mount();
+    await flush(50);
+
+    const tip = shadow(el).querySelector('.header .protect-tip')!;
+    expect(tip.textContent).toBe('GAITH data protection applies to this chat.');
+    const link = tip.querySelector('a') as HTMLAnchorElement;
+    expect(link.textContent).toBe('GAITH data protection');
+    expect(link.getAttribute('href')).toBe('https://osos.om/privacy');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toContain('noopener');
+    expect(shadow(el).querySelector('.header .privacy')!.getAttribute('aria-label'))
+      .toBe('GAITH data protection applies to this chat.');
+  });
+
+  it('shows the data protection note without a link when the policy URL is missing or not a web page', async () => {
+    routeFetch({ '/config': () => json({ theme: {}, privacy_url: 'javascript:alert(1)' }) });
+
+    const el = mount();
+    await flush(50);
+
+    const tip = shadow(el).querySelector('.header .protect-tip')!;
+    expect(tip.querySelector('a')).toBeNull();
+    expect(tip.textContent).toBe('GAITH data protection applies to this chat.');
+  });
+
+  it('words the data protection note in Arabic', () => {
+    routeFetch({});
+    const el = mount({ lang: 'ar' });
+
+    expect(shadow(el).querySelector('.header .protect-tip')!.textContent)
+      .toBe('تنطبق حماية بيانات GAITH على هذه المحادثة.');
   });
 
   it('still shows itself with the default colours when the config request fails', async () => {
@@ -433,6 +523,36 @@ describe('<gaith-chat>', () => {
       const el = mount();
       await flush(30);
       expect((shadow(el).querySelector('.attach') as HTMLElement).hidden).toBe(false);
+    });
+
+    it('judges a file by its extension, so a CSV is a CSV even when Windows calls it Excel', async () => {
+      const csvRules = { ...RULES, allowed_types: ['text/csv', 'text/markdown'] };
+      routeFetch({
+        '/config': () => json({ theme: {}, attachments: csvRules }),
+        '/attachments': uploaded('art-1', 'leave.csv', 'text/csv'),
+      });
+      const el = mount() as any;
+      await flush(30);
+
+      el.attachFiles([
+        new File(['a,b'], 'leave.csv', { type: 'application/vnd.ms-excel' }),
+        new File(['# hi'], 'notes.md', { type: '' }),
+        new File(['x'], 'budget.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      ]);
+      await flush(30);
+
+      expect(chips(el)).toEqual(['leave.csv | 1 KB', 'notes.md | 1 KB', 'budget.xlsx | Type not supported']);
+    });
+
+    it('offers every enabled type in the file picker, by type and by extension', async () => {
+      const officeRules = { ...RULES, allowed_types: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'image/tiff'] };
+      routeFetch({ '/config': () => json({ theme: {}, attachments: officeRules }) });
+      const el = mount();
+      await flush(30);
+
+      const accept = (shadow(el).querySelector('.file-input') as HTMLInputElement).accept.split(',');
+      expect(accept).toEqual(expect.arrayContaining(['.xlsx', '.tif', '.tiff', 'image/tiff']));
+      expect(accept).not.toContain('.pdf');
     });
 
     it('uploads a picked file and sends its id with the message', async () => {

@@ -12,5 +12,7 @@ await build({
   minify: true,
   sourcemap: true,
   legalComments: 'linked',
+  // The launcher logo ships inside the script, so hosts still deploy one file.
+  loader: { '.gif': 'dataurl' },
   logLevel: 'info',
 });

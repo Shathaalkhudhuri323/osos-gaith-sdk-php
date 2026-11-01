@@ -221,6 +221,10 @@ export function streamTurn(
 /** Per-product settings from the host's backend (its .env / config file). */
 export interface WidgetConfig {
   theme: { primary_color?: string; text_color?: string };
+  /** The product's data protection policy (http(s) URL or site path), or null. */
+  privacy_url: string | null;
+  /** Whether the product allows voice input (dictation by the browser's own speech recognition). */
+  voice: boolean;
   /** Extra origins markdown images may load from (the host's own is always allowed). */
   image_origins: string[];
   attachments: AttachmentRules;
@@ -301,6 +305,11 @@ export async function fetchConfig(endpoint: string, headerProvider: HeaderProvid
   const json = await response.json();
   return {
     theme: (json && typeof json.theme === 'object' && json.theme) || {},
+    // It becomes an href: web pages only, never javascript:/data: or protocol-relative.
+    privacy_url: json && typeof json.privacy_url === 'string' && /^(https?:\/\/|\/(?!\/))/i.test(json.privacy_url)
+      ? json.privacy_url
+      : null,
+    voice: !!json && json.voice !== false,
     image_origins: Array.isArray(json && json.image_origins)
       ? json.image_origins.filter((o: unknown) => typeof o === 'string')
       : [],

@@ -4,7 +4,9 @@ import {
 } from './client';
 import { Lang, normalizeLang, pick, strings } from './i18n';
 import { ImageGate, imageGate, renderMarkdown } from './render';
+import BOT_LOGO from './assets/gaith-bot.gif';
 import { STYLES } from './styles';
+import { Dictation, startDictation, voiceSupported } from './voice';
 
 /** Host-supplied texts; each is per language, falling back to English. */
 export interface GaithChatOptions {
@@ -42,20 +44,33 @@ interface PendingFile {
   previewUrl?: string;
 }
 
-/** Types by extension, for files whose type the browser does not report. */
+/** Types by extension: the same table as the SDK's AttachmentTypes (plus gif, shown inline). */
 const TYPE_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv',
+  md: 'text/markdown',
+  txt: 'text/plain',
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
 };
 
+/**
+ * The extension decides first: browsers disagree on the rest (Windows with Excel reports a
+ * .csv as application/vnd.ms-excel, a .md often comes with no type at all).
+ */
 function typeOf(file: File): string {
-  if (file.type) { return file.type.toLowerCase(); }
-  return TYPE_BY_EXTENSION[(file.name.split('.').pop() || '').toLowerCase()] || '';
+  const byName = TYPE_BY_EXTENSION[(file.name.split('.').pop() || '').toLowerCase()];
+  return byName || (file.type || '').toLowerCase();
 }
 
 /** Shown as a picture in the chat; every other file is a card. */
@@ -68,15 +83,17 @@ const PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const OPEN_TYPES = PREVIEW_TYPES.concat(['application/pdf']);
 
 const ICONS = {
-  bot: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".8"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   reset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
-  send: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>',
   attach: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   remove: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg>',
   open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>',
   file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>',
+  menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h11"/><path d="M4 17h14"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2"/></svg>',
   expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h5v5"/><path d="M9 20H4v-5"/><path d="M20 4l-6 6"/><path d="M4 20l6-6"/></svg>',
 };
 
@@ -130,14 +147,23 @@ export class GaithChatElement extends HTMLElement {
   private pending: PendingFile[] = [];
   private pendingKey = 0;
   private attachRules: AttachmentRules = NO_ATTACHMENTS;
+  /** The product's data protection policy, from the backend config. */
+  private privacyUrl: string | null = null;
+  /** The control whose hover card is showing. */
+  private tipTarget: HTMLElement | null = null;
+  /** Voice input: allowed by the backend config, the live recognition, and what was typed before it. */
+  private voiceAllowed = false;
+  private dictation: Dictation | null = null;
+  private dictationBase = '';
+  private voiceError: string | null = null;
   /** Initial config + history load; 'failed' means auth was missing and it retries once getHeaders is set. */
   private loadState: 'idle' | 'scheduled' | 'loading' | 'done' | 'failed' = 'idle';
   private els!: {
     container: HTMLElement; panel: HTMLElement;
     list: HTMLElement; input: HTMLTextAreaElement; send: HTMLButtonElement; launcher: HTMLButtonElement;
-    reset: HTMLButtonElement; close: HTMLButtonElement;
+    reset: HTMLButtonElement; close: HTMLButtonElement; mic: HTMLButtonElement;
     attach: HTMLButtonElement; fileInput: HTMLInputElement; attachments: HTMLElement; dropHint: HTMLElement;
-    powered: HTMLElement; dot: HTMLElement; statusLabel: HTMLElement;
+    powered: HTMLElement; dot: HTMLElement; statusLabel: HTMLElement; privacy: HTMLElement; protectTip: HTMLElement; tip: HTMLElement; menu: HTMLButtonElement;
   };
 
   constructor() {
@@ -217,11 +243,14 @@ export class GaithChatElement extends HTMLElement {
   /** @returns false only when the request was refused for lack of auth (worth retrying). */
   private async loadTheme(): Promise<boolean> {
     try {
-      const { theme, image_origins, attachments } = await fetchConfig(this.endpoint, this.getHeaders);
+      const { theme, privacy_url, voice, image_origins, attachments } = await fetchConfig(this.endpoint, this.getHeaders);
       this.applyTheme('--gaith-chat-theme-primary', theme.primary_color);
       this.applyTheme('--gaith-chat-theme-on-primary', theme.text_color);
+      this.privacyUrl = privacy_url;
+      this.renderProtection();
       this.gate = imageGate(image_origins);
       this.attachRules = attachments;
+      this.voiceAllowed = voice;
       this.rows.clear(); // re-render bot replies under the new image rules
       this.renderMessages();
       return true;
@@ -244,6 +273,7 @@ export class GaithChatElement extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    this.stopVoice();
     this.abandonTurn();
     // A framework may detach and later reattach the same element. The canceled
     // request can no longer call onDone/onError, so it must not leave the composer
@@ -274,11 +304,13 @@ export class GaithChatElement extends HTMLElement {
 
   close(): void {
     this.isOpen = false;
+    this.stopVoice();
     this.renderOpenState();
   }
 
   /** Drops the conversation and starts again from the welcome message. */
   reset(): void {
+    this.stopVoice();
     this.abandonTurn();
     this.status = 'idle';
     this.conversationId = null;
@@ -313,6 +345,7 @@ export class GaithChatElement extends HTMLElement {
       return file;
     });
     this.clearPending();
+    this.stopVoice(); // late words must not refill the box after sending
 
     this.messages.push({ author: 'user', text: value, sentAt: new Date(), files });
     this.els.input.value = '';
@@ -471,36 +504,43 @@ export class GaithChatElement extends HTMLElement {
       <div class="root pending" part="root">
         <div class="panel" part="panel" role="dialog" hidden>
           <div class="header" part="header">
-            <span class="status" role="status" aria-live="polite"><span class="dot"></span><span class="status-label" dir="auto"></span></span>
+            <span class="start">
+              <button type="button" class="action menu">${ICONS.menu}</button>
+              <span class="status" role="status" aria-live="polite"><span class="dot"></span><span class="status-label" dir="auto"></span></span>
+            </span>
             <span class="actions">
+              <span class="protect">
+                <span class="action privacy" tabindex="0">${ICONS.lock}</span>
+                <span class="protect-tip" role="tooltip" dir="auto"></span>
+              </span>
               <button type="button" class="action reset">${ICONS.reset}</button>
               <button type="button" class="action close">${ICONS.close}</button>
             </span>
           </div>
           <div class="messages" part="messages" aria-live="polite"></div>
           <div class="composer">
-            <div class="composer-meta">
-              <span class="powered">${ICONS.bot}<span class="powered-label" dir="auto"></span></span>
-            </div>
             <div class="attachments" hidden></div>
             <div class="composer-box">
               <button type="button" class="attach" hidden>${ICONS.attach}</button>
               <input type="file" class="file-input" multiple hidden>
               <textarea class="input" rows="1"></textarea>
+              <button type="button" class="mic" hidden>${ICONS.mic}</button>
               <button type="button" class="send">${ICONS.send}</button>
             </div>
+            <div class="powered"><span class="powered-label" dir="auto"></span></div>
           </div>
           <div class="drop-hint" hidden></div>
         </div>
         <button type="button" class="launcher" part="launcher"></button>
+        <span class="tip" role="tooltip" dir="auto"></span>
       </div>`;
 
     const q = <T extends Element>(selector: string) => this.root.querySelector(selector) as unknown as T;
     this.els = {
       container: q('.root'), panel: q('.panel'), list: q('.messages'),
       input: q('.input'), send: q('.send'), launcher: q('.launcher'), reset: q('.reset'), close: q('.close'),
-      attach: q('.attach'), fileInput: q('.file-input'), attachments: q('.attachments'), dropHint: q('.drop-hint'),
-      powered: q('.powered-label'), dot: q('.dot'), statusLabel: q('.status-label'),
+      attach: q('.attach'), mic: q('.mic'), fileInput: q('.file-input'), attachments: q('.attachments'), dropHint: q('.drop-hint'),
+      powered: q('.powered-label'), dot: q('.dot'), statusLabel: q('.status-label'), privacy: q('.privacy'), protectTip: q('.protect-tip'), tip: q('.tip'), menu: q('.menu'),
     };
 
     this.els.attach.addEventListener('click', () => this.els.fileInput.click());
@@ -532,10 +572,42 @@ export class GaithChatElement extends HTMLElement {
     });
 
     this.els.launcher.addEventListener('click', () => (this.isOpen ? this.close() : this.open()));
+
+    // Hover cards: shown for the mouse and the keyboard, not after a tap (touch has no hover).
+    const tipOf = (e: Event) => {
+      const el = e.target as Element | null;
+      return el && el.closest ? (el.closest('[data-tip]') as HTMLElement | null) : null;
+    };
+    this.root.addEventListener('pointerover', (e) => {
+      if ((e as PointerEvent).pointerType === 'touch') { return; }
+      const target = tipOf(e);
+      if (target && target !== this.tipTarget) { this.showTip(target); }
+    });
+    this.root.addEventListener('pointerout', (e) => {
+      const to = (e as PointerEvent).relatedTarget as Node | null;
+      if (this.tipTarget && !(to && this.tipTarget.contains(to))) { this.hideTip(); }
+    });
+    this.root.addEventListener('focusin', (e) => {
+      const target = tipOf(e);
+      let keyboard = true;
+      try { keyboard = !!target && target.matches(':focus-visible'); } catch (err) { /* older engines */ }
+      if (target && keyboard) { this.showTip(target); }
+    });
+    this.root.addEventListener('focusout', () => this.hideTip());
+    this.root.addEventListener('pointerdown', () => this.hideTip());
+    this.els.list.addEventListener('scroll', () => this.hideTip(), { passive: true });
     this.els.close.addEventListener('click', () => this.close());
     this.els.reset.addEventListener('click', () => this.reset());
+    // Placeholder for the coming chat history: for now it only tells the host it was clicked.
+    this.els.menu.addEventListener('click', () => {
+      this.dispatchEvent(new CustomEvent('gaith-chat:history', { bubbles: true, composed: true }));
+    });
+    this.els.mic.addEventListener('click', () => this.toggleVoice());
     this.els.send.addEventListener('click', () => this.send());
     this.els.input.addEventListener('input', () => {
+      // Typing takes over from dictation (keeping what was said); it also clears an old mic error.
+      this.stopVoice();
+      this.voiceError = null;
       this.fitInput();
       this.renderComposer();
     });
@@ -557,6 +629,8 @@ export class GaithChatElement extends HTMLElement {
     this.els.input.placeholder = pick(this._options.placeholder, this.language) || t.placeholder;
     this.els.powered.textContent = t.poweredBy;
     this.labelButton(this.els.send, t.send);
+    this.labelButton(this.els.menu, t.history);
+    this.renderProtection();
     this.labelButton(this.els.reset, t.reset);
     this.labelButton(this.els.close, t.close);
     this.labelButton(this.els.attach, t.attach);
@@ -564,9 +638,63 @@ export class GaithChatElement extends HTMLElement {
     this.renderOpenState();
   }
 
+  /**
+   * The lock's hover card: "GAITH data protection applies to this chat", the name linking
+   * to the product's policy when the backend config has one.
+   */
+  private renderProtection(): void {
+    const t = strings(this.language);
+    const name = document.createElement(this.privacyUrl ? 'a' : 'strong');
+    name.className = 'protect-name';
+    name.textContent = t.protectionName;
+    if (this.privacyUrl) {
+      name.setAttribute('href', this.privacyUrl);
+      name.setAttribute('target', '_blank');
+      name.setAttribute('rel', 'noopener noreferrer');
+    }
+    const [before, after] = t.protection.split('{name}');
+    this.els.protectTip.replaceChildren(before, name, after || '');
+    this.els.privacy.setAttribute('aria-label', before + t.protectionName + (after || ''));
+  }
+
+  /** Screen-reader name plus the hover card text (instead of the browser's own title tooltip). */
   private labelButton(button: HTMLElement, label: string): void {
     button.setAttribute('aria-label', label);
-    button.setAttribute('title', label);
+    button.setAttribute('data-tip', label);
+    if (button === this.tipTarget) { this.els.tip.textContent = label; }
+  }
+
+  /**
+   * One shared hover card for every labelled control, styled like the data protection note.
+   * Fixed to the viewport, so the panel's scrolling and clipping never cut it off: below the
+   * control, or above it when there is no room (the input row), kept inside the screen.
+   */
+  private showTip(target: HTMLElement): void {
+    const text = target.getAttribute('data-tip');
+    if (!text || (target as HTMLButtonElement).disabled) {
+      this.hideTip();
+      return;
+    }
+    this.tipTarget = target;
+    const tip = this.els.tip;
+    tip.textContent = text;
+    tip.style.left = '0px';
+    tip.style.top = '0px';
+    tip.classList.add('show');
+
+    const box = target.getBoundingClientRect();
+    const gap = 6;
+    const edge = 8;
+    let top = box.bottom + gap;
+    if (top + tip.offsetHeight > window.innerHeight - edge) { top = box.top - gap - tip.offsetHeight; }
+    const left = box.left + box.width / 2 - tip.offsetWidth / 2;
+    tip.style.top = Math.max(edge, top) + 'px';
+    tip.style.left = Math.max(edge, Math.min(left, window.innerWidth - tip.offsetWidth - edge)) + 'px';
+  }
+
+  private hideTip(): void {
+    this.tipTarget = null;
+    this.els.tip.classList.remove('show');
   }
 
   private renderOpenState(): void {
@@ -575,16 +703,16 @@ export class GaithChatElement extends HTMLElement {
     this.els.panel.hidden = !this.isOpen;
     this.els.launcher.classList.toggle('open', this.isOpen);
     this.els.launcher.classList.toggle('has-image', !!icon);
+    this.els.launcher.classList.toggle('logo', !icon);
     this.labelButton(this.els.launcher, this.isOpen ? t.close : (this.getAttribute('bot-name') || t.open));
     if (this.isOpen) {
       this.els.launcher.innerHTML = ICONS.close;
-    } else if (icon) {
+    } else {
+      // The host's own image, or the animated GAITH logo.
       const img = document.createElement('img');
-      img.src = icon;
+      img.src = icon || BOT_LOGO;
       img.alt = '';
       this.els.launcher.replaceChildren(img);
-    } else {
-      this.els.launcher.innerHTML = ICONS.bot; // the GAITH sparkles
     }
   }
 
@@ -868,13 +996,74 @@ export class GaithChatElement extends HTMLElement {
     const streaming = this.status === 'streaming';
     const uploading = this.pending.some((p) => p.status === 'uploading');
     const ready = this.pending.some((p) => p.status === 'ready');
-    this.els.input.disabled = streaming;
+    // The input stays usable during a reply (the next message can be typed, and it keeps
+    // its focus and look); only sending waits for the reply to finish.
     // Waits for uploads to finish, so a message never goes out without its files.
     this.els.send.disabled = streaming || uploading || (!this.els.input.value.trim() && !ready);
     this.els.attach.hidden = !this.attachRules.enabled;
     this.els.attach.disabled = streaming;
+    this.renderVoice();
     this.els.fileInput.accept = this.acceptList();
     this.renderAttachments();
+  }
+
+  /** Mic button state, and the input's hint while listening or after a mic failure. */
+  private renderVoice(): void {
+    const t = strings(this.language);
+    const listening = !!this.dictation;
+    this.els.mic.hidden = !this.voiceAllowed || !voiceSupported();
+    this.els.mic.disabled = this.status === 'streaming';
+    this.els.mic.classList.toggle('listening', listening);
+    this.els.mic.setAttribute('aria-pressed', String(listening));
+    this.labelButton(this.els.mic, listening ? t.stopVoice : t.voice);
+    this.els.input.placeholder = listening ? t.listening
+      : this.voiceError ? this.voiceError
+      : pick(this._options.placeholder, this.language) || t.placeholder;
+  }
+
+  /**
+   * Dictation: the words appear in the input as they are spoken, after anything already typed.
+   * Nothing is sent automatically; the user checks the text and sends it.
+   */
+  private toggleVoice(): void {
+    if (this.dictation) {
+      this.dictation.stop();
+      return;
+    }
+    const typed = this.els.input.value;
+    this.dictationBase = typed && !/\s$/.test(typed) ? typed + ' ' : typed;
+    this.voiceError = null;
+    const session: Dictation | null = startDictation(this.language === 'ar' ? 'ar-SA' : 'en-US', {
+      onText: (text) => {
+        if (this.dictation !== session) { return; } // stopped by send/close: ignore late words
+        this.els.input.value = this.dictationBase + text.replace(/^\s+/, '');
+        this.fitInput();
+        this.renderComposer();
+      },
+      onEnd: (error) => {
+        if (this.dictation === session) { this.dictation = null; }
+        if (error) {
+          const t = strings(this.language);
+          this.voiceError = error === 'not-allowed' || error === 'service-not-allowed' ? t.micBlocked : t.voiceFailed;
+          this.dispatchEvent(new CustomEvent('gaith-chat:error', {
+            detail: { code: 'voice_' + error }, bubbles: true, composed: true,
+          }));
+        }
+        this.renderComposer();
+      },
+    });
+    this.dictation = session;
+    if (!session) { this.voiceError = strings(this.language).voiceFailed; }
+    this.renderComposer();
+    this.els.input.focus();
+  }
+
+  private stopVoice(): void {
+    const session = this.dictation;
+    if (!session) { return; }
+    this.dictation = null;
+    session.abort();
+    if (this.els) { this.renderVoice(); }
   }
 
   /** The file picker's filter: the allowed types plus their extensions (some OSes need those). */

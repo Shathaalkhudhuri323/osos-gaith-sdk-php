@@ -8,6 +8,17 @@ export interface Strings {
   unavailable: string;
   placeholder: string;
   poweredBy: string;
+  /** The menu at the top left; will open the list of past chats. */
+  history: string;
+  /** The lock's hover card; {name} is replaced by protectionName (a link to the policy when set). */
+  protection: string;
+  protectionName: string;
+  voice: string;
+  stopVoice: string;
+  listening: string;
+  /** The browser or the user refused the microphone. */
+  micBlocked: string;
+  voiceFailed: string;
   send: string;
   reset: string;
   close: string;
@@ -43,6 +54,14 @@ const STRINGS: Record<Lang, Strings> = {
     unavailable: 'Unavailable',
     placeholder: 'Example: “Show my pending approvals”',
     poweredBy: 'Powered by GAITH',
+    history: 'Chat history',
+    protection: '{name} applies to this chat.',
+    protectionName: 'GAITH data protection',
+    voice: 'Voice input',
+    stopVoice: 'Stop voice input',
+    listening: 'Listening...',
+    micBlocked: 'Microphone access is blocked',
+    voiceFailed: 'Voice input is not available',
     send: 'Send',
     reset: 'New conversation',
     close: 'Close',
@@ -74,6 +93,14 @@ const STRINGS: Record<Lang, Strings> = {
     unavailable: 'غير متاح',
     placeholder: 'مثال: «اعرض الموافقات المعلقة»',
     poweredBy: 'مدعوم من GAITH',
+    history: 'سجل المحادثات',
+    protection: 'تنطبق {name} على هذه المحادثة.',
+    protectionName: 'حماية بيانات GAITH',
+    voice: 'الإدخال الصوتي',
+    stopVoice: 'إيقاف الإدخال الصوتي',
+    listening: 'جارٍ الاستماع...',
+    micBlocked: 'تم حظر الوصول إلى الميكروفون',
+    voiceFailed: 'الإدخال الصوتي غير متاح',
     send: 'إرسال',
     reset: 'محادثة جديدة',
     close: 'إغلاق',
